@@ -164,6 +164,7 @@ local function _decorate(parent: BasePart, legend: string, owner: number)
 		trunk.Name = "Tree"
 		trunk.Anchored = true
 		trunk.CanCollide = false
+		trunk.CanQuery = false
 		trunk.Material = Enum.Material.Wood
 		trunk.Color = Color3.fromRGB(90, 58, 32)
 		trunk.Size = Vector3.new(0.7, 3, 0.7)
@@ -173,6 +174,7 @@ local function _decorate(parent: BasePart, legend: string, owner: number)
 		leaf.Name = "Leaf"
 		leaf.Anchored = true
 		leaf.CanCollide = false
+		leaf.CanQuery = false
 		leaf.Material = Enum.Material.Grass
 		leaf.Color = Color3.fromRGB(28, 110, 46)
 		leaf.Size = Vector3.new(2.4, 2.2, 2.4)
@@ -185,6 +187,7 @@ local function _decorate(parent: BasePart, legend: string, owner: number)
 		house.Name = if legend == "C" then "Keep" else "House"
 		house.Anchored = true
 		house.CanCollide = false
+		house.CanQuery = false
 		house.Material = Enum.Material.Brick
 		house.Color = if owner == EnumMgr.AEFaction.Player
 			then Color3.fromRGB(70, 140, 80)
@@ -341,6 +344,9 @@ function BoardView.Highlight(cells: { any }, selectedX: number?, selectedY: numb
 		mark.Name = "Reach"
 		mark.Anchored = true
 		mark.CanCollide = false
+		mark.CanQuery = false
+		mark:SetAttribute("X", cell.x)
+		mark:SetAttribute("Y", cell.y)
 		mark.Material = Enum.Material.Neon
 		mark.Color = Color3.fromRGB(70, 180, 255)
 		mark.Transparency = 0.55
@@ -354,6 +360,9 @@ function BoardView.Highlight(cells: { any }, selectedX: number?, selectedY: numb
 		sel.Name = "Selected"
 		sel.Anchored = true
 		sel.CanCollide = false
+		sel.CanQuery = false
+		sel:SetAttribute("X", selectedX)
+		sel:SetAttribute("Y", selectedY)
 		sel.Material = Enum.Material.Neon
 		sel.Color = Color3.fromRGB(255, 220, 70)
 		sel.Transparency = 0.35

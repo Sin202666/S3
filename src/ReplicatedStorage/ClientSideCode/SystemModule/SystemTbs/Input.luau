@@ -114,7 +114,7 @@ local function _refreshHighlight()
 end
 
 --[[
-	射线点到的实例
+	射线点到的实例（屏幕坐标，含顶栏 inset）
 	@return Instance? - 命中
 ]]
 local function _hit(): Instance?
@@ -123,8 +123,8 @@ local function _hit(): Instance?
 	if not camera or not localPlayer then
 		return nil
 	end
-	local mouse = localPlayer:GetMouse()
-	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
+	local mousePos = UserInputService:GetMouseLocation()
+	local ray = camera:ScreenPointToRay(mousePos.X, mousePos.Y)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	if localPlayer.Character then
@@ -135,7 +135,7 @@ local function _hit(): Instance?
 end
 
 --[[
-	处理一次点击
+	处理一次点击。点到格上装饰时仍按该格单位处理，否则城堡/树会挡住选中。
 	@return nil
 ]]
 local function _onClick()
@@ -148,6 +148,12 @@ local function _onClick()
 	local inst = _hit()
 	local unitId = BoardView.UnitIdFromInstance(inst)
 	local x, y = BoardView.CellFromInstance(inst)
+	if not unitId and x ~= nil and y ~= nil then
+		local occupant = _unitAt(x, y)
+		if occupant then
+			unitId = occupant.id
+		end
+	end
 	if unitId then
 		local unit = _unitById(unitId)
 		if unit and unit.faction == EnumMgr.AEFaction.Player then

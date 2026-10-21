@@ -38,6 +38,7 @@ local _onAction: ((string, any) -> ())? = nil
 local _getSelected: (() -> any?)? = nil
 local _snap: any = nil
 local _clicksBound = false
+local _dupConn: RBXScriptConnection? = nil
 
 --[[
 	建 TextLabel
@@ -241,11 +242,48 @@ local function _bindClicks(_guiInst: ScreenGui)
 end
 
 --[[
+	只留一份 TbsHud。StarterGui 模板会在角色出现后再克隆一份，叠在上面且没绑点击。
+	@param playerGui PlayerGui - 玩家 GUI
+	@param keep ScreenGui - 保留
+	@return nil
+]]
+local function _destroyExtraHuds(playerGui: PlayerGui, keep: ScreenGui)
+	for _, child in playerGui:GetChildren() do
+		if child.Name == GUI_NAME and child:IsA("ScreenGui") and child ~= keep then
+			child:Destroy()
+		end
+	end
+end
+
+--[[
+	监听后克隆的重复 HUD
+	@param playerGui PlayerGui - 玩家 GUI
+	@param keep ScreenGui - 保留
+	@return nil
+]]
+local function _watchExtraHuds(playerGui: PlayerGui, keep: ScreenGui)
+	if _dupConn then
+		_dupConn:Disconnect()
+		_dupConn = nil
+	end
+	_dupConn = playerGui.ChildAdded:Connect(function(child: Instance)
+		if child.Name == GUI_NAME and child:IsA("ScreenGui") and child ~= keep then
+			child:Destroy()
+		end
+	end)
+end
+
+--[[
 	保证 HUD 树
 	@return ScreenGui - TbsHud
 ]]
 local function _ensureGui(): ScreenGui
 	if _gui and _gui.Parent then
+		local playerGui = _gui.Parent
+		if playerGui:IsA("PlayerGui") then
+			_destroyExtraHuds(playerGui, _gui)
+			_watchExtraHuds(playerGui, _gui)
+		end
 		return _gui
 	end
 	local player = Players.LocalPlayer
@@ -258,6 +296,10 @@ local function _ensureGui(): ScreenGui
 			_bindRefs(exist)
 			_bindClicks(exist)
 			_bindTopInset()
+			if playerGui:IsA("PlayerGui") then
+				_destroyExtraHuds(playerGui, exist)
+				_watchExtraHuds(playerGui, exist)
+			end
 			return exist
 		end
 	end
@@ -322,6 +364,10 @@ local function _ensureGui(): ScreenGui
 	_gui = gui
 	_bindClicks(gui)
 	_bindTopInset()
+	if playerGui and playerGui:IsA("PlayerGui") then
+		_destroyExtraHuds(playerGui, gui)
+		_watchExtraHuds(playerGui, gui)
+	end
 	return gui
 end
 

@@ -37,11 +37,17 @@ local SystemTbs = {}
 
 local SESSION_OWNER = "TBS:Session"
 local HUD_NAME = "TbsHud"
+local KEEP_GUI = {
+	[HUD_NAME] = true,
+	TipsGui = true,
+}
 
 local _inited = false
 local _hud: any = nil
 local _inputToken: string? = nil
 local _snap: any = nil
+local _guiWatch: RBXScriptConnection? = nil
+local _guiLocks: { [ScreenGui]: RBXScriptConnection } = {}
 
 --[[
 	战棋是否启用
@@ -119,6 +125,53 @@ local function _lockCharacter(character: Model?)
 end
 
 --[[
+	锁住非战棋 ScreenGui，防止其他系统稍后又打开挡住点格。
+	@param gui ScreenGui - 目标
+	@return nil
+]]
+local function _lockForeignGui(gui: ScreenGui)
+	if KEEP_GUI[gui.Name] == true then
+		gui.Enabled = true
+		return
+	end
+	gui.Enabled = false
+	if _guiLocks[gui] then
+		return
+	end
+	_guiLocks[gui] = gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if gui.Enabled and KEEP_GUI[gui.Name] ~= true then
+			gui.Enabled = false
+		end
+	end)
+end
+
+--[[
+	只留战棋 HUD 和 Tips。其他玩法 GUI 后开也会挡住点格。
+	@return nil
+]]
+local function _isolateHud()
+	UIMgr.HideAllBut(HUD_NAME)
+	local player = Players.LocalPlayer
+	local playerGui = player and player:FindFirstChild("PlayerGui")
+	if not playerGui or not playerGui:IsA("PlayerGui") then
+		return
+	end
+	for _, child in playerGui:GetChildren() do
+		if child:IsA("ScreenGui") then
+			_lockForeignGui(child)
+		end
+	end
+	if _guiWatch then
+		return
+	end
+	_guiWatch = playerGui.ChildAdded:Connect(function(child: Instance)
+		if child:IsA("ScreenGui") then
+			_lockForeignGui(child)
+		end
+	end)
+end
+
+--[[
 	启动客户端
 	@return nil
 ]]
@@ -140,7 +193,8 @@ function SystemTbs.Init()
 		Log.warn("SystemTbs 加载 HUD 失败", hud)
 	end
 
-	UIMgr.HideAllBut(HUD_NAME)
+	_isolateHud()
+	task.defer(_isolateHud)
 	_inputToken = SystemInput.PushContext(SystemInput.ContextIds.UIModal)
 
 	Input.Start(_send, function()

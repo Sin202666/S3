@@ -62,10 +62,12 @@ local function _bindInput()
 			if input.UserInputType == Enum.UserInputType.MouseWheel then
 				_dist = math.clamp(_dist - input.Position.Z * 6, MIN_DIST, MAX_DIST)
 			elseif input.UserInputType == Enum.UserInputType.MouseMovement then
-				if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+				local holdingRight = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+				local holdingMid = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton3)
+				if holdingRight then
 					_yaw -= input.Delta.X * 0.008
 					_pitch = math.clamp(_pitch + input.Delta.Y * 0.006, 0.35, 1.35)
-				elseif UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton3) then
+				elseif holdingMid then
 					local right = Vector3.new(math.cos(_yaw), 0, -math.sin(_yaw))
 					local fwd = Vector3.new(-math.sin(_yaw), 0, -math.cos(_yaw))
 					_pan += right * (-input.Delta.X * 0.12) + fwd * (-input.Delta.Y * 0.12)
