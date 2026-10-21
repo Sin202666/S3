@@ -10,6 +10,7 @@
 	- 解析 1-1 网格（含 C1/C2 归属）
 	- 四向 BFS 移动、FindPath 还原路径、曼哈顿射程、策划案伤害公式
 	- 占领 / 招募 / 胜负条件判定（调用方传入对局快照字段）
+	- IsFlyer：Kind == Flyer（飞龙），水面不下沉、熔岩可进
 
 	与 SystemTbs：本模块只算，不改 MatchStore。服务端结算必须再跑一遍。
 
@@ -85,6 +86,15 @@ end
 ]]
 function AERules.GetUnitCfg(unitId: number): any?
 	return CfgFind.GetCfgByNameAndID(CONF_UNIT, unitId)
+end
+
+--[[
+	是否飞行兵种
+	@param unitCfg any - 兵种行；缺行视为否
+	@return boolean - Kind 为 Flyer
+]]
+function AERules.IsFlyer(unitCfg: any): boolean
+	return type(unitCfg) == "table" and unitCfg.Kind == "Flyer"
 end
 
 --[[
@@ -375,7 +385,7 @@ function AERules.CanEnterTerrain(unitCfg: any, terrainCfg: any): boolean
 	end
 	local flyOnly = tonumber(terrainCfg.FlyOnly) or 0
 	if flyOnly == 1 then
-		return unitCfg and unitCfg.Kind == "Flyer"
+		return AERules.IsFlyer(unitCfg)
 	end
 	local cost = tonumber(terrainCfg.MoveCost) or 1
 	if cost >= 99 then

@@ -11,7 +11,9 @@
 	能力：
 	- TileColor / TileMaterial：地砖底色与 Glacier + 2022 Big Stud
 	- Apply：在格子上铺对应装饰与厚土；零件 CanQuery=false，避免挡点选
-	- EnsureIsland / ResetIsland：海面与岛边
+	- EnsureIsland / ResetIsland：浅海面与岛边（水面贴近地面，单位可下水）
+	- SurfaceOffset：水面格相对棋盘的下沉量
+	- StandOffset：棋子站位；非飞行兵在水面再下沉固定深度
 
 	关系：由 BoardView.Apply 每帧快照重建；占领后 owner 变化会换旗色。
 
@@ -22,6 +24,8 @@
 		part.Material = BoardDecor.TileMaterial("C")
 		part.MaterialVariant = BoardDecor.VARIANT
 		BoardDecor.Apply(part, "C", EnumMgr.AEFaction.Player, 2, 2)
+		part.CFrame += Vector3.new(0, BoardDecor.SurfaceOffset("~"), 0)
+		local standY = BoardDecor.StandOffset("~", false)
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -52,9 +56,42 @@ local LEAF_B = Color3.fromRGB(174, 196, 93)
 local PINK_A = Color3.fromRGB(248, 180, 210)
 local PINK_B = Color3.fromRGB(255, 160, 190)
 local SEA = Color3.fromRGB(4, 175, 236)
+local SEA_B = Color3.fromRGB(3, 148, 206)
 local WOOD = Color3.fromRGB(148, 102, 58)
+-- 水面只比地砖顶低一点，作战单位走进去是涉水而不是跳崖
+local WATER_Y_OFFSET = -0.65
+-- 非飞行兵脚底相对水面再下沉，飞龙贴着水面
+local WATER_SINK = 1.5
+local CLIFF_H = 1.15
+local CLIFF_Y = -0.82
 
 local _islandKey = ""
+
+--[[
+	水面格相对棋盘中心的下沉
+	@param legend string - 图例
+	@return number - Y 偏移
+]]
+function BoardDecor.SurfaceOffset(legend: string): number
+	if legend == "~" then
+		return WATER_Y_OFFSET
+	end
+	return 0
+end
+
+--[[
+	棋子相对棋盘中心的站位下沉。水面格上：飞龙贴水面，其余陷入固定深度。
+	@param legend string - 图例
+	@param isFlyer boolean - 飞行兵种
+	@return number - Y 偏移
+]]
+function BoardDecor.StandOffset(legend: string, isFlyer: boolean): number
+	local surface = BoardDecor.SurfaceOffset(legend)
+	if legend == "~" and not isFlyer then
+		return surface - WATER_SINK
+	end
+	return surface
+end
 
 --[[
 	零件中心 Y（坐在 base 表面上）
@@ -180,12 +217,12 @@ local function _tree(parent: BasePart, x: number, y: number)
 	local leafB = if pink then PINK_B else LEAF_B
 	local leafC = if pink then PINK_A else FOREST_A
 	local tall = (x + y) % 2 == 0
-	local h = if tall then 4.4 else 3.5
-	_add(parent, "Trunk", Vector3.new(1.55, h, 1.55), Vector3.new(0, _sitY(h), 0), TRUNK, STYLE_MAT)
-	_add(parent, "Leaf", Vector3.new(4.2, 2.5, 4.2), Vector3.new(0, TILE_TOP + h + 0.85, 0), leafA, STYLE_MAT)
-	_add(parent, "LeafMid", Vector3.new(3.1, 1.9, 3.1), Vector3.new(0, TILE_TOP + h + 2.3, 0), leafB, STYLE_MAT)
+	local h = if tall then 2.9 else 2.3
+	_add(parent, "Trunk", Vector3.new(1.05, h, 1.05), Vector3.new(0, _sitY(h), 0), TRUNK, STYLE_MAT)
+	_add(parent, "Leaf", Vector3.new(2.8, 1.65, 2.8), Vector3.new(0, TILE_TOP + h + 0.55, 0), leafA, STYLE_MAT)
+	_add(parent, "LeafMid", Vector3.new(2.05, 1.25, 2.05), Vector3.new(0, TILE_TOP + h + 1.5, 0), leafB, STYLE_MAT)
 	if tall or pink then
-		_add(parent, "LeafTop", Vector3.new(2.1, 1.4, 2.1), Vector3.new(0, TILE_TOP + h + 3.5, 0), leafC, STYLE_MAT)
+		_add(parent, "LeafTop", Vector3.new(1.4, 0.95, 1.4), Vector3.new(0, TILE_TOP + h + 2.3, 0), leafC, STYLE_MAT)
 	end
 end
 
@@ -384,6 +421,9 @@ function BoardDecor.TileColor(legend: string, x: number?, y: number?): Color3
 	if legend == "R" then
 		return if dark then STONE_B else PATH_B
 	end
+	if legend == "~" then
+		return if dark then SEA_B else SEA
+	end
 	return if dark then GRASS_A else GRASS_B
 end
 
@@ -422,7 +462,7 @@ function BoardDecor.EnsureIsland(
 	cellCenter: (number, number) -> Vector3,
 	boardY: number
 )
-	local key = w .. "x" .. h .. ":stud"
+	local key = w .. "x" .. h .. ":shore"
 	if _islandKey == key then
 		return
 	end
@@ -442,7 +482,7 @@ function BoardDecor.EnsureIsland(
 	sea.Material = STYLE_MAT
 	sea.MaterialVariant = STYLE_VARIANT
 	sea.Size = Vector3.new((w + 20) * tileSize, 1, (h + 20) * tileSize)
-	sea.CFrame = CFrame.new(mid.X, boardY - 4.2, mid.Z)
+	sea.CFrame = CFrame.new(mid.X, boardY + WATER_Y_OFFSET, mid.Z)
 	sea.Color = SEA
 	sea.Parent = island
 	for x = -1, w do
@@ -469,8 +509,8 @@ function BoardDecor.EnsureIsland(
 				cliff.CanQuery = false
 				cliff.Material = STYLE_MAT
 				cliff.MaterialVariant = STYLE_VARIANT
-				cliff.Size = Vector3.new(tileSize - 0.08, 3.2, tileSize - 0.08)
-				cliff.CFrame = cf * CFrame.new(0, -2.1, 0)
+				cliff.Size = Vector3.new(tileSize - 0.08, CLIFF_H, tileSize - 0.08)
+				cliff.CFrame = cf * CFrame.new(0, CLIFF_Y, 0)
 				cliff.Color = DIRT
 				cliff.Parent = island
 			end
@@ -493,9 +533,14 @@ function BoardDecor.Apply(parent: BasePart, legend: string, owner: number, x: nu
 		end
 	end
 	local size = parent.Size
-	_add(parent, "Cliff", Vector3.new(size.X, 3.2, size.Z), Vector3.new(0, -2.1, 0), DIRT, STYLE_MAT)
+	if legend ~= "~" then
+		_add(parent, "Cliff", Vector3.new(size.X, CLIFF_H, size.Z), Vector3.new(0, CLIFF_Y, 0), DIRT, STYLE_MAT)
+	end
 	local col = x or 0
 	local row = y or 0
+	if legend == "~" then
+		return
+	end
 	if legend == "T" then
 		_tree(parent, col, row)
 		return

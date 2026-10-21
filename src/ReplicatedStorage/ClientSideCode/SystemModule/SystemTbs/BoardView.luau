@@ -1,7 +1,7 @@
 --[[
 	Module: BoardView
 	Description: 按快照生成棋盘与 R6 棋子；只插值，不回写权威、不写玩家角色。
-	棋盘视觉走 BoardDecor。移动按路径逐格走并播 WalkForward。
+	棋盘视觉走 BoardDecor。水面贴近地面；非飞行兵下水陷入固定深度，飞龙贴水面。移动按路径逐格走并播 WalkForward。
 	Author: 程莘
 	Created: 2026-10-21
 	Last Modified: 2026-10-21
@@ -28,6 +28,8 @@ local BoardDecor = require(script.Parent.BoardDecor)
 
 local MOVE_TWEEN = TweenInfo.new(0.28, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
 local PATH_COLOR = Color3.fromRGB(255, 230, 90)
+local TILE_HALF = 0.5
+local DEFAULT_HIP = 2
 
 local BoardView = {}
 
@@ -217,6 +219,69 @@ function BoardView.ShowPath(cells: { any })
 end
 
 --[[
+	R6 站立髋高。CreateHumanoidModelFromDescription 常给 HipHeight=0，
+	套用后脚会埋进砖面约 2 studs。
+	@param model Model - 棋子
+	@return number - HipHeight
+]]
+local function _hipOf(model: Model): number
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.HipHeight > 0.05 then
+		return humanoid.HipHeight
+	end
+	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+	local originY = if hrp and hrp:IsA("BasePart") then hrp.Position.Y else model:GetPivot().Position.Y
+	local hrpHalf = if hrp and hrp:IsA("BasePart") then hrp.Size.Y * 0.5 else 1
+	local lowest = originY
+	for _, inst in model:GetDescendants() do
+		if inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
+			local holder = inst.Parent
+			if not (holder and (holder:IsA("Accoutrement") or holder:IsA("Tool"))) then
+				local bottom = inst.Position.Y - inst.Size.Y * 0.5
+				if bottom < lowest then
+					lowest = bottom
+				end
+			end
+		end
+	end
+	local measured = originY - lowest - hrpHalf
+	if measured > 0.2 then
+		return measured
+	end
+	return DEFAULT_HIP
+end
+
+--[[
+	格图例
+	@param x number - 列
+	@param y number - 行
+	@return string - 图例，缺格为平地
+]]
+local function _legendAt(x: number, y: number): string
+	local part = _tiles[x .. "," .. y]
+	if not part then
+		return "."
+	end
+	local legend = part:GetAttribute("Legend")
+	if typeof(legend) ~= "string" then
+		return "."
+	end
+	return legend
+end
+
+--[[
+	棋子相对棋盘的站位下沉（水面：非飞行陷入，飞龙贴水面）
+	@param x number - 列
+	@param y number - 行
+	@param unitType number? - 兵种 Id
+	@return number - Y 偏移
+]]
+local function _standOffset(x: number, y: number, unitType: number?): number
+	local cfg = if unitType then AERules.GetUnitCfg(unitType) else nil
+	return BoardDecor.StandOffset(_legendAt(x, y), AERules.IsFlyer(cfg))
+end
+
+--[[
 	棋子落点（脚踩格面，可指定朝向）
 	@param x number - 列
 	@param y number - 行
@@ -224,15 +289,22 @@ end
 	@param lookX number? - 朝向列；缺省按阵营
 	@param lookY number? - 朝向行
 	@param faction number? - 阵营（无朝向时用）
+	@param unitType number? - 兵种 Id；缺省按非飞行
 	@return CFrame - 根部位姿
 ]]
-local function _pivotAt(x: number, y: number, model: Model, lookX: number?, lookY: number?, faction: number?): CFrame
+local function _pivotAt(
+	x: number,
+	y: number,
+	model: Model,
+	lookX: number?,
+	lookY: number?,
+	faction: number?,
+	unitType: number?
+): CFrame
 	local center = BoardView.CellCenter(x, y)
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	local hip = if humanoid then humanoid.HipHeight else 2
 	local hrpY = if hrp and hrp:IsA("BasePart") then hrp.Size.Y * 0.5 else 1
-	local pos = Vector3.new(center.X, _boardY() + 0.5 + hip + hrpY, center.Z)
+	local pos = Vector3.new(center.X, _boardY() + _standOffset(x, y, unitType) + TILE_HALF + _hipOf(model) + hrpY, center.Z)
 	if lookX ~= nil and lookY ~= nil and (lookX ~= x or lookY ~= y) then
 		local look = BoardView.CellCenter(lookX, lookY)
 		return CFrame.lookAt(pos, Vector3.new(look.X, pos.Y, look.Z))
@@ -248,7 +320,7 @@ end
 	@return CFrame - 根部位姿
 ]]
 local function _unitPivot(unit: any, model: Model): CFrame
-	return _pivotAt(unit.x, unit.y, model, nil, nil, unit.faction)
+	return _pivotAt(unit.x, unit.y, model, nil, nil, unit.faction, unit.unitType)
 end
 
 --[[
@@ -356,7 +428,8 @@ local function _walkUnit(model: Model, unit: any, cells: { any }, gen: number)
 			model,
 			dest.x + (dest.x - prev.x),
 			dest.y + (dest.y - prev.y),
-			unit.faction
+			unit.faction,
+			unit.unitType
 		)
 		local tween = TweenService:Create(hrp, MOVE_TWEEN, { CFrame = target })
 		_walkTween[unit.id] = tween
@@ -582,6 +655,9 @@ local function _freezeRig(model: Model)
 		humanoid.JumpHeight = 0
 		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		if humanoid.HipHeight < 0.05 then
+			humanoid.HipHeight = DEFAULT_HIP
+		end
 	end
 	local hrp = model:FindFirstChild("HumanoidRootPart")
 	if hrp and hrp:IsA("BasePart") then
@@ -757,8 +833,9 @@ function BoardView.Apply(snap: any)
 		part.Material = BoardDecor.MAT
 		part.MaterialVariant = BoardDecor.VARIANT
 		part.Color = BoardDecor.TileColor(tile.legend, tile.x, tile.y)
-		part.CFrame = CFrame.new(BoardView.CellCenter(tile.x, tile.y))
-		local decorKey = tostring(tile.legend) .. ":" .. tostring(tile.owner)
+		part:SetAttribute("Legend", tile.legend)
+		part.CFrame = CFrame.new(BoardView.CellCenter(tile.x, tile.y) + Vector3.new(0, BoardDecor.SurfaceOffset(tile.legend), 0))
+		local decorKey = tostring(tile.legend) .. ":" .. tostring(tile.owner) .. ":shore"
 		if part:GetAttribute("DecorKey") ~= decorKey then
 			part:SetAttribute("DecorKey", decorKey)
 			BoardDecor.Apply(part, tile.legend, tile.owner, tile.x, tile.y)
