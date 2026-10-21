@@ -3,7 +3,7 @@
 	Description: SystemSave 玩家存档默认结构与 Value 暴露列表
 	Author: 林奥宇
 	Created: 2026-06-30
-	Last Modified: 2026-10-15
+	Last Modified: 2026-10-21
 ]]
 
 -- ========================================
@@ -89,6 +89,11 @@ local _PLAYER_META_DATA = {
 		OfflinePending = 0,
 		-- 菜单挽留礼物是否已领（每账号一次，SystemArmWrestle.MenuGift）
 		MenuGiftClaimed = false,
+	},
+
+	-- 战棋进度（对局过程在会话内存，不落盘）
+	Tbs = {
+		Stage1Clear = 0,
 	},
 }
 

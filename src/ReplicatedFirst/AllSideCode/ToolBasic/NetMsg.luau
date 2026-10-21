@@ -3,7 +3,7 @@
 	Description: 游戏通信 msgName 常量表，避免字符串拼写错误
 	Author: 林奥宇
 	Created: 2026-07-02
-	Last Modified: 2026-10-14
+	Last Modified: 2026-10-21
 
 	功能：
 	- RemoteEvent / RemoteFunction / Bindable 的 msgName 常量
@@ -113,5 +113,13 @@ NetMsg.ARM_WRESTLE_ACTION = "扳手腕操作"
 NetMsg.ARM_WRESTLE_BATTLE = "扳手腕对局"
 NetMsg.ARM_WRESTLE_ROLL = "扳手腕抽奖"
 NetMsg.ARM_WRESTLE_NOTIFY = "扳手腕通知"
+
+-- 过门扩军（Default 通道）
+NetMsg.GATE_RUN_STEER = "GateRunSteer"
+NetMsg.GATE_RUN_STATE = "GateRunState"
+
+-- 战棋（Default 通道）
+NetMsg.TBS_ACTION = "战棋操作"
+NetMsg.TBS_NOTIFY = "战棋通知"
 
 return NetMsg

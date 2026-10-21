@@ -100,6 +100,10 @@ end
 -- 初始化
 -- ============================================================================
 
+if SystemGameConfig.GetValue({ "AFK", "启用" }) == false then
+	return
+end
+
 _afkTime = _getConfigNumber(CONFIG_PATH_TIMEOUT, DEFAULT_AFK_TIME)
 _idleResetThreshold = _getConfigNumber(CONFIG_PATH_IDLE_RESET, DEFAULT_IDLE_RESET)
 LocalPlayer.Idled:Connect(_onIdled)

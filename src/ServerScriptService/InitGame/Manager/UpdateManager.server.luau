@@ -3,7 +3,7 @@
 	Description: 服务端定时调度与关服编排——预加载 Register 定时任务的 System、启动调度循环、处理关服与地理信息
 	Author: 林奥宇
 	Created: 2026-07-03
-	Last Modified: 2026-10-14
+	Last Modified: 2026-10-21
 
 	功能：
 	- 预加载已在模块加载期 Register 定时任务或 Remote 的 System，确保 Start 前完成注册
@@ -88,6 +88,7 @@ local _SystemOnlineAward = Utils.SystemOnlineAward
 local _SystemCode = Utils.SystemCode
 local _SystemSet = Utils.SystemSet
 local SystemInputBind = Utils.SystemInputBind
+local SystemTbs = Utils.SystemTbs
 
 -- ========================================
 -- 常量定义
@@ -294,6 +295,7 @@ SystemEmail.StartDelivery()
 		registerSweep = true,
 	})
 	SystemInputBind.Init()
+	SystemTbs.Init()
 
 	CombatWorld.Init()
 	SystemCharacterMotion.Init()

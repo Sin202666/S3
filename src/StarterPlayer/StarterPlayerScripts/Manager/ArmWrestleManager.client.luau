@@ -9,6 +9,11 @@
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
+local SystemGameConfig = Utils.SystemGameConfig
 local SystemArmWrestle = Utils.SystemArmWrestle
+
+if SystemGameConfig.GetValue({ "扳手腕系统", "启用" }) == false then
+	return
+end
 
 SystemArmWrestle.Init()

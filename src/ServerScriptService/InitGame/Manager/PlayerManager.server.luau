@@ -3,7 +3,7 @@
 	Description: 服务端玩家生命周期管理器，编排玩家加入/离开与各 System 初始化
 	Author: 林奥宇
 	Created: 2026-06-30
-	Last Modified: 2026-10-14
+	Last Modified: 2026-10-21
 
 	功能：
 	- 玩家加入时按序初始化会话数据与各 System
@@ -56,6 +56,7 @@ local SystemSkill = Utils.SystemSkill
 local SystemPlayerSkill = Utils.SystemPlayerSkill
 local SystemPlrAttr = Utils.SystemPlrAttr
 local SystemArmWrestle = Utils.SystemArmWrestle
+local SystemTbs = Utils.SystemTbs
 
 local HumanModule = Utils.HumanModule
 local VisibleMgr = Utils.VisibleMgr
@@ -385,8 +386,18 @@ local function _initPlayerDataAndSystems(plr: Player): boolean
 	-- 在线奖励暂时下线（GameConfig「在线奖励.启用」= false）
 	-- SystemOnlineAward.Init(plr)
 	-- if plr.Parent ~= Players then return false end
-	SystemArmWrestle.SetupPlayer(plr)
-	if plr.Parent ~= Players then return false end
+	if SystemGameConfig.GetValue({ "扳手腕系统", "启用" }) == true then
+		SystemArmWrestle.SetupPlayer(plr)
+		if plr.Parent ~= Players then return false end
+	end
+	if SystemGameConfig.GetValue({ "战棋系统", "启用" }) == true then
+		-- 战棋开局失败不得拖垮整段进服；由本处记日志，玩家仍可进其他玩法
+		local tbsOk, tbsErr = pcall(SystemTbs.SetupPlayer, plr)
+		if not tbsOk then
+			Log.warn("SystemTbs.SetupPlayer failed", plr.UserId, tbsErr)
+		end
+		if plr.Parent ~= Players then return false end
+	end
 
 	_tryInitPlayerSkill(plr)
 	if plr.Parent ~= Players then return false end
@@ -496,7 +507,9 @@ local function _setupCharacterOnSpawn(plr: Player, character: Model)
 	end
 
 	_disableLimbCollision(character)
-	SystemArmWrestle.OnCharacter(plr, character)
+	if SystemGameConfig.GetValue({ "扳手腕系统", "启用" }) == true then
+		SystemArmWrestle.OnCharacter(plr, character)
+	end
 end
 
 --[[
@@ -563,7 +576,9 @@ end
 -- 事件监听
 -- ========================================
 SystemBagToolbar.Init()
-SystemArmWrestle.Init()
+if SystemGameConfig.GetValue({ "扳手腕系统", "启用" }) == true then
+	SystemArmWrestle.Init()
+end
 
 Players.PlayerAdded:Connect(_handlePlayerAdded)
 
@@ -577,7 +592,12 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 		return
 	end
 
-	SystemArmWrestle.OnPlayerRemoving(plr)
+	if SystemGameConfig.GetValue({ "扳手腕系统", "启用" }) == true then
+		SystemArmWrestle.OnPlayerRemoving(plr)
+	end
+	if SystemGameConfig.GetValue({ "战棋系统", "启用" }) == true then
+		SystemTbs.OnPlayerRemoving(plr)
+	end
 	SystemSave.PlayerLeaveSave(plr)
 end)
 

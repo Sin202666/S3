@@ -1,6 +1,10 @@
 
 local ConfigInstance ={}
 ConfigInstance.key={
+aeconstConf={"Value","Remark"},
+aemapConf={"ZhName","StageKey","W","H","WinCond","StartGold","EnemyGold","AllowRecruit","PlayerUnits","EnemyUnits","Grid"},
+aeterrainConf={"ZhName","Legend","DefBonus","MoveCost","FlyOnly"},
+aeunitConf={"ZhName","Kind","Move","Atk","Def","RangeMin","RangeMax","Price","MaxStar","Hp"},
 awarmConf={"ZhName","Mult","Xyd","Price","Robux","ProductKey","Limited","ColorR","ColorG","ColorB","Icon"},
 awconstConf={"Value","Remark"},
 awdumbbellConf={"ZhName","Mult","Xyd","Price","PlateR","PlateG","PlateB","PlateMat","PlateScale","HandleR","HandleG","HandleB","Icon"},
@@ -22,6 +26,54 @@ peteggConf={"DisName","ZhName","PoolOnlyTag","tp","pool","weight","cost","price"
 settingConf={"ZhName","ShowName","SetType","TempType","set","range","isPecent","ZhDes","isShow","mobieFade"},
 skillConf={"ZhName","ScriptName","","","Icon","Priority","Range","EffectTarget","needCheck","isBase","exp","","ElementTp","AttackEffectPos","CD","DamageRate","","buffs","","","","ForceHitAnimation","Size","Band","SummonBand"},
 updatelogConf={"UpdateTime","ZhTagTitle","ZhUpdateText"},
+}
+
+ConfigInstance.aeconstConf={
+	["VILLAGE_GOLD"]={30,"村庄每回合产金"},
+	["CASTLE_GOLD"]={50,"城堡每回合产金"},
+	["BUILDING_HEAL"]={20,"己方建筑驻军回血"},
+	["COUNTER_MUL"]={0.75,"近战反击倍率"},
+	["MAX_HP"]={100,"单位满血"},
+	["ADVANTAGE_MUL"]={1.5,"克制伤害倍率"},
+	["DISADVANTAGE_MUL"]={0.75,"被克伤害倍率"},
+	["MIN_DAMAGE"]={1,"命中最低伤害"},
+	["COMMANDER_ID"]={1,"指挥官兵种 Id"},
+	["SOLDIER_ID"]={2,"士兵兵种 Id"}
+}
+
+ConfigInstance.aemapConf={
+	[1]={"初阵","1-1",10,8,"Eliminate",500,0,{1,2},{"1:2,2","2:1,2","2:3,2"},{"2:5,7","2:6,7"},{". . . . T . . . . .",". V . . . . . T . .",". . C1 . . . . . V .",". . . . . . . . . .",". T . . . . . . T .",". . . V . . . . . .",". . . . . . . . . .",". . T . . C2 . . . ."}}
+}
+
+ConfigInstance.aeterrainConf={
+	[1]={"平地",".",0,1,0},
+	[2]={"道路","-",0,1,0},
+	[3]={"草地",",",0,1,0},
+	[4]={"森林","T",10,2,0},
+	[5]={"丘陵","H",10,2,0},
+	[6]={"山地","M",15,3,0},
+	[7]={"雪地","S",5,2,0},
+	[8]={"桥梁","=",5,1,0},
+	[9]={"水面","~",0,3,0},
+	[10]={"熔岩","L",0,99,1},
+	[11]={"村庄","V",15,1,0},
+	[12]={"城堡","C",15,1,0},
+	[13]={"兵营","B",15,1,0},
+	[14]={"神殿","R",15,1,0}
+}
+
+ConfigInstance.aeunitConf={
+	[1]={"指挥官","Melee",7,35,30,1,1,400,4,100},
+	[2]={"士兵","Melee",6,20,25,1,1,150,3,100},
+	[3]={"弓箭手","Ranged",5,30,20,2,4,250,3,100},
+	[4]={"魔导士","Ranged",5,35,20,2,3,400,4,100},
+	[5]={"骷髅","Melee",5,15,15,1,1,0,1,100},
+	[6]={"小不点","Support",6,10,20,1,1,500,2,100},
+	[7]={"狼","Melee",8,30,25,1,1,600,3,100},
+	[8]={"石头人","Melee",4,35,40,1,1,600,4,100},
+	[9]={"投石车","Ranged",3,50,15,2,5,700,2,100},
+	[10]={"水元素","Melee",5,25,25,1,1,300,3,100},
+	[11]={"飞龙","Flyer",8,45,30,1,1,1000,5,100}
 }
 
 ConfigInstance.awarmConf={

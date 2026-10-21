@@ -3,7 +3,7 @@
 	Description: 全项目共享枚举与错误码（元素、物品、坐骑、技能、灯光等）
 	Author: 林奥宇
 	Created: 2026-06-30
-	Last Modified: 2026-10-14
+	Last Modified: 2026-10-21
 
 	功能：
 	- 提供 ItemType / BagShow / MountErr / SkillTp / SkillSlot / SkillFolder / SkillErr / PlayerInst / SkillReleaseReject / LightingApplyResult / ShopErr / DailyAwardErr / SetErr / BuyRobloxErr / CodeErr / LogicalDriveMode 等常量
@@ -515,5 +515,78 @@ setmetatable(EnumMgr.SettingCategory, {
 		[5] = "其他",
 	},
 })
+
+EnumMgr.RunPhase = table.freeze({
+	Idle = "Idle",
+	Running = "Running",
+	Won = "Won",
+	Lost = "Lost",
+})
+
+EnumMgr.GateOp = table.freeze({
+	Add = "add",
+	Mul = "mul",
+	Sub = "sub",
+})
+
+-- 战棋阵营（0 中立建筑）
+EnumMgr.AEFaction = {
+	None = 0,
+	Player = 1,
+	Enemy = 2,
+}
+
+-- 战棋兵种 Id，与 aeunitConf 主键对齐
+EnumMgr.AEUnitId = {
+	Commander = 1,
+	Soldier = 2,
+	Archer = 3,
+	Wizard = 4,
+	Skeleton = 5,
+	Wisp = 6,
+	Wolf = 7,
+	Golem = 8,
+	Catapult = 9,
+	Water = 10,
+	Dragon = 11,
+}
+
+-- 战棋地形 Id，与 aeterrainConf 主键对齐
+EnumMgr.AETerrain = {
+	Plains = 1,
+	Road = 2,
+	Grass = 3,
+	Forest = 4,
+	Hill = 5,
+	Mountain = 6,
+	Snow = 7,
+	Bridge = 8,
+	Water = 9,
+	Lava = 10,
+	Village = 11,
+	Castle = 12,
+	Barracks = 13,
+	Shrine = 14,
+}
+
+-- 战棋客户端意图（Remote action 字符串）
+EnumMgr.AEAction = {
+	Sync = "Sync",
+	Move = "Move",
+	Attack = "Attack",
+	Occupy = "Occupy",
+	Recruit = "Recruit",
+	EndTurn = "EndTurn",
+	Restart = "Restart",
+}
+
+EnumMgr.AEWinCond = {
+	Eliminate = "Eliminate",
+}
+
+EnumMgr.AENotify = {
+	Snapshot = "Snapshot",
+	Reject = "Reject",
+}
 
 return EnumMgr
