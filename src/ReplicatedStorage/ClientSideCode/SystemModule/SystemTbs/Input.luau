@@ -1,6 +1,6 @@
 --[[
 	Module: Input
-	Description: 战棋点格选单位 / 移动 / 攻击；意图发服务端
+	Description: 战棋按地面格选单位 / 移动 / 攻击；意图发服务端。悬浮高亮当前格，可走格预览路径。
 	Author: 程莘
 	Created: 2026-10-21
 	Last Modified: 2026-10-21
@@ -9,7 +9,8 @@
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
 local UserInputService = Utils.UserInputService
 local Players = Utils.Players
-local Workspace = game:GetService("Workspace")
+local GuiService = Utils.GuiService
+local RunService = Utils.RunService
 local AERules = Utils.AERules
 local EnumMgr = Utils.EnumMgr
 
@@ -22,6 +23,8 @@ local _selectedId: number? = nil
 local _onAction: ((string, any) -> ())? = nil
 local _onSelect: (() -> ())? = nil
 local _conn: RBXScriptConnection? = nil
+local _hoverConn: RBXScriptConnection? = nil
+local _pathKey = ""
 
 --[[
 	按 Id 取单位
@@ -70,38 +73,59 @@ local function _reachList(): { any }
 	if not unit or unit.moved or unit.acted or not unit.alive then
 		return {}
 	end
-	local cfg = AERules.GetUnitCfg(unit.unitType)
-	if not cfg then
+	local spec = AERules.MoveSpecFromSnap(_snap, unit)
+	if not spec then
 		return {}
 	end
-	local tileIndex: { [string]: any } = {}
-	for _, tile in AERules.CellsFromSnap(_snap) do
-		tileIndex[tile.x .. "," .. tile.y] = tile
-	end
-	local reach = AERules.FindReachable({
-		w = _snap.w,
-		h = _snap.h,
-		startX = unit.x,
-		startY = unit.y,
-		movePoints = tonumber(cfg.Move) or 0,
-		getCost = function(x: number, y: number): number
-			local tile = tileIndex[x .. "," .. y]
-			local terrain = tile and AERules.GetTerrainById(tile.terrainId)
-			if terrain and not AERules.CanEnterTerrain(cfg, terrain) then
-				return 99
-			end
-			return terrain and (tonumber(terrain.MoveCost) or 1) or 1
-		end,
-		isBlocked = function(x: number, y: number): boolean
-			local other = _unitAt(x, y)
-			return other ~= nil and other.id ~= unit.id
-		end,
-	})
+	local reach = AERules.FindReachable(spec)
 	local list = {}
 	for _, cell in reach do
 		table.insert(list, cell)
 	end
 	return list
+end
+
+--[[
+	悬停可走格时画路径；走路中不改 BoardView 的路径
+	@param x number? - 列
+	@param y number? - 行
+	@return nil
+]]
+local function _refreshPathPreview(x: number?, y: number?)
+	if BoardView.IsWalking() then
+		return
+	end
+	if x == nil or y == nil or not _snap or not _selectedId then
+		if _pathKey ~= "" then
+			_pathKey = ""
+			BoardView.ClearPath()
+		end
+		return
+	end
+	local unit = _unitById(_selectedId)
+	if not unit or unit.moved or unit.acted or not unit.alive then
+		if _pathKey ~= "" then
+			_pathKey = ""
+			BoardView.ClearPath()
+		end
+		return
+	end
+	local key = unit.id .. ":" .. x .. "," .. y
+	if key == _pathKey then
+		return
+	end
+	_pathKey = key
+	if x == unit.x and y == unit.y then
+		BoardView.ClearPath()
+		return
+	end
+	local spec = AERules.MoveSpecFromSnap(_snap, unit, x, y)
+	local path = spec and AERules.FindPath(spec)
+	if path and #path >= 2 then
+		BoardView.ShowPath(path)
+		return
+	end
+	BoardView.ClearPath()
 end
 
 --[[
@@ -114,28 +138,66 @@ local function _refreshHighlight()
 end
 
 --[[
-	射线点到的实例（屏幕坐标，含顶栏 inset）
-	@return Instance? - 命中
+	指针是否在战棋 HUD 实心底上（顶栏/卡/按钮）
+	@return boolean - 在 HUD 上
 ]]
-local function _hit(): Instance?
-	local camera = Workspace.CurrentCamera
-	local localPlayer = Players.LocalPlayer
-	if not camera or not localPlayer then
-		return nil
+local function _isPointerOverHud(): boolean
+	local player = Players.LocalPlayer
+	local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then
+		return false
 	end
-	local mousePos = UserInputService:GetMouseLocation()
-	local ray = camera:ScreenPointToRay(mousePos.X, mousePos.Y)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	if localPlayer.Character then
-		params.FilterDescendantsInstances = { localPlayer.Character }
+	local mouse = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
+	local hits = playerGui:GetGuiObjectsAtPosition(mouse.X, mouse.Y)
+	for _, gui in hits do
+		if gui:IsA("GuiObject") and gui.Visible and gui.BackgroundTransparency < 1 then
+			local root: Instance? = gui
+			while root and root.Name ~= "TbsHud" do
+				root = root.Parent
+			end
+			if root and root.Name == "TbsHud" then
+				return true
+			end
+		end
 	end
-	local result = Workspace:Raycast(ray.Origin, ray.Direction * 800, params)
-	return result and result.Instance
+	return false
 end
 
 --[[
-	处理一次点击。点到格上装饰时仍按该格单位处理，否则城堡/树会挡住选中。
+	鼠标投影到的地面格
+	@return number? - 列
+	@return number? - 行
+]]
+local function _cellFromMouse(): (number?, number?)
+	if not _snap then
+		return nil, nil
+	end
+	return BoardView.CellFromScreen(UserInputService:GetMouseLocation())
+end
+
+--[[
+	刷新悬浮高亮
+	@return nil
+]]
+local function _updateHover()
+	if not _snap or _isPointerOverHud() then
+		BoardView.ClearHover()
+		_refreshPathPreview(nil, nil)
+		return
+	end
+	local x, y = _cellFromMouse()
+	if x == nil or y == nil then
+		BoardView.ClearHover()
+		_refreshPathPreview(nil, nil)
+		return
+	end
+	local occupant = _unitAt(x, y)
+	BoardView.SetHover(occupant and occupant.id, x, y)
+	_refreshPathPreview(x, y)
+end
+
+--[[
+	处理一次点击。只认地面格，避免邻格棋子模型互相挡。
 	@return nil
 ]]
 local function _onClick()
@@ -145,43 +207,37 @@ local function _onClick()
 	if _snap.result or _snap.turnFaction ~= EnumMgr.AEFaction.Player then
 		return
 	end
-	local inst = _hit()
-	local unitId = BoardView.UnitIdFromInstance(inst)
-	local x, y = BoardView.CellFromInstance(inst)
-	if not unitId and x ~= nil and y ~= nil then
-		local occupant = _unitAt(x, y)
-		if occupant then
-			unitId = occupant.id
-		end
+	if _isPointerOverHud() then
+		return
 	end
-	if unitId then
-		local unit = _unitById(unitId)
-		if unit and unit.faction == EnumMgr.AEFaction.Player then
-			_selectedId = unitId
+	local x, y = _cellFromMouse()
+	if x == nil or y == nil then
+		return
+	end
+	local occupant = _unitAt(x, y)
+	if occupant then
+		if occupant.faction == EnumMgr.AEFaction.Player then
+			_selectedId = occupant.id
 			_refreshHighlight()
 			if _onSelect then
 				_onSelect()
 			end
 			return
 		end
-		if unit and unit.faction ~= EnumMgr.AEFaction.Player and _selectedId then
-			_onAction(EnumMgr.AEAction.Attack, { unitId = _selectedId, targetId = unitId })
-			return
-		end
-	end
-	if x ~= nil and y ~= nil and _selectedId then
-		local occupant = _unitAt(x, y)
-		if occupant and occupant.faction ~= EnumMgr.AEFaction.Player then
+		if _selectedId then
 			_onAction(EnumMgr.AEAction.Attack, { unitId = _selectedId, targetId = occupant.id })
 			return
 		end
+	end
+	if _selectedId then
 		_onAction(EnumMgr.AEAction.Move, { unitId = _selectedId, x = x, y = y })
 	end
 end
 
 --[[
-	启动点击
+	启动点击与悬浮
 	@param onAction (string, any) -> () - 发意图
+	@param onSelect (() -> ())? - 选中后刷新 HUD
 	@return nil
 ]]
 function Input.Start(onAction: (string, any) -> (), onSelect: (() -> ())?)
@@ -198,6 +254,9 @@ function Input.Start(onAction: (string, any) -> (), onSelect: (() -> ())?)
 			_onClick()
 		end
 	end)
+	if not _hoverConn then
+		_hoverConn = RunService.Heartbeat:Connect(_updateHover)
+	end
 end
 
 --[[
@@ -213,7 +272,9 @@ function Input.SetSnap(snap: any)
 			_selectedId = nil
 		end
 	end
+	_pathKey = ""
 	_refreshHighlight()
+	_updateHover()
 end
 
 --[[
@@ -236,10 +297,17 @@ function Input.Stop()
 		_conn:Disconnect()
 		_conn = nil
 	end
+	if _hoverConn then
+		_hoverConn:Disconnect()
+		_hoverConn = nil
+	end
 	_onAction = nil
 	_selectedId = nil
 	_snap = nil
+	_pathKey = ""
 	BoardView.ClearHighlights()
+	BoardView.ClearHover()
+	BoardView.ClearPath()
 end
 
 return Input

@@ -8,7 +8,7 @@
 	功能：
 	- 读 aeunit / aeterrain / aemap / aeconst（深拷贝，不挂 ItemType）
 	- 解析 1-1 网格（含 C1/C2 归属）
-	- 四向 BFS 移动、曼哈顿射程、策划案伤害公式
+	- 四向 BFS 移动、FindPath 还原路径、曼哈顿射程、策划案伤害公式
 	- 占领 / 招募 / 胜负条件判定（调用方传入对局快照字段）
 
 	与 SystemTbs：本模块只算，不改 MatchStore。服务端结算必须再跑一遍。
@@ -424,6 +424,129 @@ function AERules.FindReachable(spec: any): { [string]: { x: number, y: number, l
 		end
 	end
 	return result
+end
+
+--[[
+	从快照组装寻路 spec（客户端预览 / 表现兜底；与可达格同一套代价）
+	@param snap table - MatchSnap
+	@param unit table - 单位（起点用其 x/y）
+	@param destX number? - 终点列
+	@param destY number? - 终点行
+	@return table? - FindReachable / FindPath spec
+]]
+function AERules.MoveSpecFromSnap(snap: any, unit: any, destX: number?, destY: number?): any?
+	if type(snap) ~= "table" or type(unit) ~= "table" then
+		return nil
+	end
+	local cfg = AERules.GetUnitCfg(unit.unitType)
+	local tileIndex: { [string]: any } = {}
+	for _, tile in AERules.CellsFromSnap(snap) do
+		tileIndex[tile.x .. "," .. tile.y] = tile
+	end
+	local blocked: { [string]: boolean } = {}
+	if type(snap.units) == "table" then
+		for _, other in snap.units do
+			if other.alive and other.id ~= unit.id then
+				blocked[other.x .. "," .. other.y] = true
+			end
+		end
+	end
+	return {
+		w = snap.w,
+		h = snap.h,
+		startX = unit.x,
+		startY = unit.y,
+		destX = destX,
+		destY = destY,
+		movePoints = cfg and (tonumber(cfg.Move) or 0) or 0,
+		getCost = function(x: number, y: number): number
+			local tile = tileIndex[x .. "," .. y]
+			local terrain = tile and AERules.GetTerrainById(tile.terrainId)
+			if terrain and not AERules.CanEnterTerrain(cfg, terrain) then
+				return 99
+			end
+			if tile and tile.moveCost ~= nil then
+				return tonumber(tile.moveCost) or 1
+			end
+			return terrain and (tonumber(terrain.MoveCost) or 1) or 1
+		end,
+		isBlocked = function(x: number, y: number): boolean
+			return blocked[x .. "," .. y] == true
+		end,
+	}
+end
+
+--[[
+	四向 BFS 还原从起点到终点的路径（代价/阻挡与 FindReachable 相同）
+	@param spec table - 同 FindReachable，另需 destX/destY
+	@return { { x: number, y: number } }? - 含起终点；不可达 nil
+]]
+function AERules.FindPath(spec: any): { { x: number, y: number } }?
+	if type(spec) ~= "table" then
+		return nil
+	end
+	local startX = spec.startX
+	local startY = spec.startY
+	local destX = spec.destX
+	local destY = spec.destY
+	if startX == nil or startY == nil or destX == nil or destY == nil then
+		return nil
+	end
+	if startX == destX and startY == destY then
+		return { { x = startX, y = startY } }
+	end
+	local w = spec.w
+	local h = spec.h
+	local movePoints = spec.movePoints
+	local getCost = spec.getCost
+	local isBlocked = spec.isBlocked
+	local from: { [string]: { x: number, y: number } } = {}
+	local best: { [string]: number } = {}
+	best[startX .. "," .. startY] = movePoints
+	local queue = { { x = startX, y = startY, left = movePoints } }
+	local head = 1
+	while head <= #queue do
+		local cur = queue[head]
+		head += 1
+		for _, d in DIR4 do
+			local nx = cur.x + d[1]
+			local ny = cur.y + d[2]
+			if AERules.InBounds(nx, ny, w, h) then
+				local cost = getCost(nx, ny)
+				local left = cur.left - cost
+				local key = nx .. "," .. ny
+				if left >= 0 and not isBlocked(nx, ny) then
+					local prev = best[key]
+					if prev == nil or left > prev then
+						best[key] = left
+						from[key] = { x = cur.x, y = cur.y }
+						table.insert(queue, { x = nx, y = ny, left = left })
+					end
+				end
+			end
+		end
+	end
+	local destKey = destX .. "," .. destY
+	if from[destKey] == nil then
+		return nil
+	end
+	local path = { { x = destX, y = destY } }
+	local cx, cy = destX, destY
+	local guard = 0
+	while not (cx == startX and cy == startY) do
+		guard += 1
+		if guard > 512 then
+			return nil
+		end
+		local prev = from[cx .. "," .. cy]
+		if not prev then
+			return nil
+		end
+		table.insert(path, 1, { x = prev.x, y = prev.y })
+		cx = prev.x
+		cy = prev.y
+	end
+	return path
 end
 
 --[[

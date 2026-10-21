@@ -157,6 +157,26 @@ function MatchStore.GetTile(match: any, x: number, y: number): any?
 end
 
 --[[
+	记下本帧要播的移动路径（表现提示，不进存档）
+	@param match table - 对局
+	@param unitId number - 单位
+	@param cells { { x: number, y: number } } - 含起终点
+	@return nil
+]]
+function MatchStore.RecordMovePath(match: any, unitId: number, cells: { any })
+	if type(match) ~= "table" or type(cells) ~= "table" or #cells < 2 then
+		return
+	end
+	if type(match.lastMovePaths) ~= "table" then
+		match.lastMovePaths = {}
+	end
+	table.insert(match.lastMovePaths, {
+		unitId = unitId,
+		cells = Copy.deepCopy(cells),
+	})
+end
+
+--[[
 	可序列化快照
 	@param match table - 对局
 	@return table - MatchSnap
@@ -195,6 +215,8 @@ function MatchStore.Snapshot(match: any): any
 	end
 	local goldP = match.gold[EnumMgr.AEFaction.Player] or 0
 	local goldE = match.gold[EnumMgr.AEFaction.Enemy] or 0
+	local movePaths = match.lastMovePaths
+	match.lastMovePaths = nil
 	return {
 		kind = EnumMgr.AENotify.Snapshot,
 		mapId = match.mapId,
@@ -216,6 +238,7 @@ function MatchStore.Snapshot(match: any): any
 		turnIndex = match.turnIndex,
 		result = match.result,
 		allowRecruit = Copy.deepCopy(match.allowRecruit),
+		movePaths = movePaths,
 	}
 end
 

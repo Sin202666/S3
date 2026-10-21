@@ -21,6 +21,11 @@ export type UnitSnap = {
 	alive: boolean,
 }
 
+export type MovePathSnap = {
+	unitId: number,
+	cells: { { x: number, y: number } },
+}
+
 export type MatchSnap = {
 	kind: string,
 	mapId: number,
@@ -34,6 +39,7 @@ export type MatchSnap = {
 	turnIndex: number,
 	result: string?,
 	allowRecruit: { number },
+	movePaths: { MovePathSnap }?,
 }
 
 --[[

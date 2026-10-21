@@ -136,9 +136,16 @@ local function _actUnit(match: any, unit: any)
 			end
 		end
 		if best then
+			local spec = _reachSpec(match, unit)
+			spec.destX = best.x
+			spec.destY = best.y
+			local path = AERules.FindPath(spec)
 			unit.x = best.x
 			unit.y = best.y
 			unit.moved = true
+			if path and #path >= 2 then
+				MatchStore.RecordMovePath(match, unit.id, path)
+			end
 		end
 	end
 	if not unit.acted then

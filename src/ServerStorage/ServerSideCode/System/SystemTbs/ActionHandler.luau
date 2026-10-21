@@ -39,18 +39,22 @@ local function _ownActiveUnit(match: any, unitId: number): (any?, string?)
 end
 
 --[[
-	单位可走格
+	单位寻路上下文
 	@param match table - 对局
 	@param unit table - 单位
-	@return { [string]: any } - 可达
+	@param destX number? - 终点列
+	@param destY number? - 终点行
+	@return table - FindPath spec
 ]]
-local function _reachable(match: any, unit: any): { [string]: any }
+local function _moveSpec(match: any, unit: any, destX: number?, destY: number?): any
 	local cfg = AERules.GetUnitCfg(unit.unitType)
-	return AERules.FindReachable({
+	return {
 		w = match.w,
 		h = match.h,
 		startX = unit.x,
 		startY = unit.y,
+		destX = destX,
+		destY = destY,
 		movePoints = cfg and (tonumber(cfg.Move) or 0) or 0,
 		getCost = function(x: number, y: number): number
 			local tile = MatchStore.GetTile(match, x, y)
@@ -64,7 +68,7 @@ local function _reachable(match: any, unit: any): { [string]: any }
 			local other = MatchStore.UnitAt(match, x, y)
 			return other ~= nil and other.id ~= unit.id
 		end,
-	})
+	}
 end
 
 --[[
@@ -92,13 +96,14 @@ function ActionHandler.Move(match: any, payload: any): (boolean, string?)
 		unit.moved = true
 		return true, nil
 	end
-	local reach = _reachable(match, unit)
-	if not reach[x .. "," .. y] then
+	local path = AERules.FindPath(_moveSpec(match, unit, x, y))
+	if not path or #path < 2 then
 		return false, "UNREACHABLE"
 	end
 	unit.x = x
 	unit.y = y
 	unit.moved = true
+	MatchStore.RecordMovePath(match, unitId, path)
 	return true, nil
 end
 
