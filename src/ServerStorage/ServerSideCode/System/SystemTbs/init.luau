@@ -3,11 +3,11 @@
 	Description: 战棋服务端权威：开局、意图校验、结算、快照下推。对局在会话内存。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 
 	功能：
 	- SetupPlayer 按 GameConfig 默认关卡开 1-1
-	- TBS_ACTION：Sync / Move / Attack / Occupy / Recruit / EndTurn / Restart
+	- TBS_ACTION：Sync / Move / Attack / Occupy / Wait / Recruit / EndTurn / Restart
 	- 客户端只报意图；伤害、金币、胜负只在本模块改
 	- 通关写 SaveMetaData.Tbs.Stage1Clear
 
@@ -149,6 +149,8 @@ local function _dispatch(player: Player, action: any, payload: any): (boolean, a
 		ok, err = ActionHandler.Attack(match, payload)
 	elseif action == EnumMgr.AEAction.Occupy then
 		ok, err = ActionHandler.Occupy(match, payload)
+	elseif action == EnumMgr.AEAction.Wait then
+		ok, err = ActionHandler.Wait(match, payload)
 	elseif action == EnumMgr.AEAction.Recruit then
 		ok, err = ActionHandler.Recruit(match, payload)
 	elseif action == EnumMgr.AEAction.EndTurn then

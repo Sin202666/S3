@@ -3,7 +3,7 @@
 	Description: 全项目共享枚举与错误码（元素、物品、坐骑、技能、灯光等）
 	Author: 林奥宇
 	Created: 2026-06-30
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 
 	功能：
 	- 提供 ItemType / BagShow / MountErr / SkillTp / SkillSlot / SkillFolder / SkillErr / PlayerInst / SkillReleaseReject / LightingApplyResult / ShopErr / DailyAwardErr / SetErr / BuyRobloxErr / CodeErr / LogicalDriveMode 等常量
@@ -575,6 +575,7 @@ EnumMgr.AEAction = {
 	Move = "Move",
 	Attack = "Attack",
 	Occupy = "Occupy",
+	Wait = "Wait",
 	Recruit = "Recruit",
 	EndTurn = "EndTurn",
 	Restart = "Restart",

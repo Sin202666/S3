@@ -3,7 +3,7 @@
 	Description: 战棋 HUD：金币、回合、单位卡、占领/招募/结束回合、胜负。缺 Studio 树时自建 ScreenGui。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -415,17 +415,8 @@ function TbsHud.Apply(snap: any)
 		end
 	end
 
-	local canOccupy = false
-	if selected and snap.turnFaction == EnumMgr.AEFaction.Player and not selected.acted then
-		for _, tile in AERules.CellsFromSnap(snap) do
-			if tile.x == selected.x and tile.y == selected.y then
-				canOccupy = AERules.CanOccupy(tile.legend, tile.owner, selected.faction)
-				break
-			end
-		end
-	end
 	if _occupy then
-		_occupy.Visible = canOccupy
+		_occupy.Visible = false
 	end
 	local myTurn = snap.turnFaction == EnumMgr.AEFaction.Player and snap.result == nil
 	if _recruitSoldier then

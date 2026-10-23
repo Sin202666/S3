@@ -3,7 +3,7 @@
 	Description: 战棋客户端：收快照、画棋盘、点格发意图、俯视镜头、锁人。不结算。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 
 	功能：
 	- Init 后注册 TBS_NOTIFY，Sync 拉快照
@@ -82,6 +82,9 @@ end
 	@return nil
 ]]
 local function _send(action: string, payload: any)
+	if BoardView.IsBusy() and action ~= EnumMgr.AEAction.Sync then
+		return
+	end
 	local ok, data = NetWork.InvokeServer(NetMsg.TBS_ACTION, action, payload)
 	if type(ok) == "table" then
 		_applySnap(ok)

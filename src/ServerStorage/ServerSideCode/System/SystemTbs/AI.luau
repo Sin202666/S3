@@ -3,7 +3,7 @@
 	Description: 1-1 敌军简单 AI：能打就打（残血/指挥官优先），否则朝最近玩家走近
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -104,9 +104,12 @@ local function _actUnit(match: any, unit: any)
 		end
 		local target = _pickTarget(inRange)
 		if target then
-			Combat.ResolveAttack(match, unit, target)
-			Combat.RefreshResult(match)
-			return true
+			local ok, _, hits = Combat.ResolveAttack(match, unit, target)
+			if ok then
+				MatchStore.RecordCombatHits(match, hits)
+				Combat.RefreshResult(match)
+			end
+			return ok
 		end
 		return false
 	end

@@ -3,7 +3,7 @@
 	Description: 校验并执行客户端战棋意图；只改 MatchStore
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -147,8 +147,9 @@ function ActionHandler.Attack(match: any, payload: any): (boolean, string?)
 	then
 		return false, "OUT_OF_RANGE"
 	end
-	local ok, combatErr = Combat.ResolveAttack(match, unit, target)
+	local ok, combatErr, hits = Combat.ResolveAttack(match, unit, target)
 	if ok then
+		MatchStore.RecordCombatHits(match, hits)
 		Combat.RefreshResult(match)
 	end
 	return ok, combatErr
@@ -178,6 +179,30 @@ function ActionHandler.Occupy(match: any, payload: any): (boolean, string?)
 		return false, "CANNOT_OCCUPY"
 	end
 	tile.owner = unit.faction
+	unit.acted = true
+	unit.moved = true
+	return true, nil
+end
+
+--[[
+	待命：结束该单位本回合行动
+	@param match table - 对局
+	@param payload any - { unitId }
+	@return boolean - 成功
+	@return string? - 失败码
+]]
+function ActionHandler.Wait(match: any, payload: any): (boolean, string?)
+	local unitId = tonumber(payload and payload.unitId)
+	if not unitId then
+		return false, "BAD_PAYLOAD"
+	end
+	local unit, err = _ownActiveUnit(match, unitId)
+	if not unit then
+		return false, err
+	end
+	if unit.acted then
+		return false, "ALREADY_ACTED"
+	end
 	unit.acted = true
 	unit.moved = true
 	return true, nil

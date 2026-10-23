@@ -1,17 +1,23 @@
 --[[
 	Module: BoardView
-	Description: 按快照生成棋盘与 R6 棋子；只插值，不回写权威、不写玩家角色。
+	Description: 按快照生成棋盘与棋子；只插值，不回写权威、不写玩家角色。
 	棋盘视觉走 BoardDecor。水面贴近地面；非飞行兵下水陷入固定深度，飞龙贴水面。移动按路径逐格走并播 WalkForward。
+	攻击表现走 CombatFx；棋子转向/前冲仍只写本模块 HumanRootPart。
+	棋子主节点统一为 HumanRootPart（PrimaryPart），所有落点/走路只写该零件 CFrame。
+	我方指挥官按本地玩家 UserId 生成完整人模整模挂上，不拆零件、不套兵种配置衣服。
+	其余兵种用经典 Noob 底色 + 配置衬衫/裤子/帽子。指挥官与普通士兵右手持剑。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 
 	能力：
-	- Apply：地砖与棋子；有 movePaths 时按格走，否则落点
+	- Apply：地砖与棋子；有 movePaths 时按格走，有 combatHits 时走完再打
 	- Highlight / ShowPath / SetHover：可达、预览路径、悬浮
+	- GetUnitModel / GetRootPart：给操作环取棋子根
 	- CellFromScreen：点选按地面格平面取格
+	- IsBusy：走路或攻击播放中
 
-	约束：棋子 CFrame 只由本模块写；HRP 保持锚定；不写玩家角色。
+	约束：棋子 CFrame 只由本模块写；HumanRootPart 保持锚定；不写玩家角色。
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -25,11 +31,24 @@ local AnimationModule = Utils.AnimationModule
 local Log = Utils.Log
 
 local BoardDecor = require(script.Parent.BoardDecor)
+local CombatFx = require(script.Parent.CombatFx)
 
 local MOVE_TWEEN = TweenInfo.new(0.28, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+local LUNGE_OUT = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local LUNGE_BACK = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+local LUNGE_DIST = 1.8
 local PATH_COLOR = Color3.fromRGB(255, 230, 90)
 local TILE_HALF = 0.5
-local DEFAULT_HIP = 2
+local DEFAULT_HIP = 3
+local ROOT_NAME = "HumanRootPart"
+local HUM_ROOT_NAME = "HumanoidRootPart"
+local SWORD_NAME = "TbsSword"
+local NOOB_YELLOW = Color3.fromRGB(245, 205, 48)
+local NOOB_BLUE = Color3.fromRGB(13, 105, 172)
+local NOOB_GREEN = Color3.fromRGB(164, 189, 71)
+local SWORD_STEEL = Color3.fromRGB(220, 224, 232)
+local SWORD_GUARD = Color3.fromRGB(86, 86, 94)
+local SWORD_HILT = Color3.fromRGB(168, 118, 58)
 
 local BoardView = {}
 
@@ -51,6 +70,7 @@ local _walking: { [number]: boolean } = {}
 local _walkTween: { [number]: Tween } = {}
 local _walkGen = 0
 local _walkBusy = false
+local _onWalkDone: (() -> ())? = nil
 
 --[[
 	格子边长
@@ -169,6 +189,45 @@ function BoardView.IsWalking(): boolean
 end
 
 --[[
+	走路或攻击播放中（点格 / 发意图应停）
+	@return boolean - 忙碌
+]]
+function BoardView.IsBusy(): boolean
+	return _walkBusy
+end
+
+--[[
+	走路结束后回调（给操作环用）
+	@param fn (() -> ())? - 回调；nil 清除
+	@return nil
+]]
+function BoardView.SetWalkDoneListener(fn: (() -> ())?)
+	_onWalkDone = fn
+end
+
+--[[
+	取棋子模型
+	@param unitId number - 单位 Id
+	@return Model? - 棋子
+]]
+function BoardView.GetUnitModel(unitId: number): Model?
+	return _units[unitId]
+end
+
+--[[
+	取棋子主节点 HumanRootPart
+	@param model Model - 棋子
+	@return BasePart? - 根
+]]
+function BoardView.GetRootPart(model: Model): BasePart?
+	local named = model:FindFirstChild(ROOT_NAME)
+	if named and named:IsA("BasePart") then
+		return named
+	end
+	return model.PrimaryPart
+end
+
+--[[
 	画移动路径（金点 + 连线，不挡点选）
 	@param cells { { x: number, y: number } } - 含起终点
 	@return nil
@@ -219,36 +278,112 @@ function BoardView.ShowPath(cells: { any })
 end
 
 --[[
-	R6 站立髋高。CreateHumanoidModelFromDescription 常给 HipHeight=0，
-	套用后脚会埋进砖面约 2 studs。
+	棋子主节点：优先 HumanRootPart，没有则用 HumanoidRootPart。
 	@param model Model - 棋子
-	@return number - HipHeight
+	@return BasePart? - 根零件
 ]]
-local function _hipOf(model: Model): number
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid and humanoid.HipHeight > 0.05 then
-		return humanoid.HipHeight
+local function _rootOf(model: Model): BasePart?
+	local named = model:FindFirstChild(ROOT_NAME)
+	if named and named:IsA("BasePart") then
+		return named
 	end
-	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	local originY = if hrp and hrp:IsA("BasePart") then hrp.Position.Y else model:GetPivot().Position.Y
-	local hrpHalf = if hrp and hrp:IsA("BasePart") then hrp.Size.Y * 0.5 else 1
+	local hrp = model:FindFirstChild(HUM_ROOT_NAME, true)
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+		return model.PrimaryPart
+	end
+	return nil
+end
+
+--[[
+	把主节点钉成 HumanRootPart，并让 HumanoidRootPart 焊在上面。
+	@param model Model - 棋子
+	@return BasePart? - HumanRootPart
+]]
+local function _bindRoot(model: Model): BasePart?
+	local root = model:FindFirstChild(ROOT_NAME)
+	if not (root and root:IsA("BasePart")) then
+		local hrp = model:FindFirstChild(HUM_ROOT_NAME, true)
+		if hrp and hrp:IsA("BasePart") then
+			root = Instance.new("Part")
+			root.Name = ROOT_NAME
+			root.Size = hrp.Size
+			root.CFrame = hrp.CFrame
+			root.Transparency = 1
+			root.CanCollide = false
+			root.CanQuery = false
+			root.CanTouch = false
+			root.Massless = true
+			root.Anchored = true
+			root.Parent = model
+		end
+	end
+	if not (root and root:IsA("BasePart")) then
+		return nil
+	end
+	model.PrimaryPart = root
+	model.WorldPivot = root.CFrame
+	local humRoot = model:FindFirstChild(HUM_ROOT_NAME, true)
+	if humRoot and humRoot:IsA("BasePart") and humRoot ~= root then
+		humRoot.Anchored = false
+		humRoot.Massless = true
+		humRoot.CanCollide = false
+		if (humRoot.Position - root.Position).Magnitude > 0.05 then
+			humRoot.CFrame = root.CFrame
+		end
+		local hasWeld = false
+		for _, inst in humRoot:GetChildren() do
+			if inst:IsA("WeldConstraint") and (inst.Part0 == root or inst.Part1 == root) then
+				hasWeld = true
+				break
+			end
+		end
+		if not hasWeld then
+			local weld = Instance.new("WeldConstraint")
+			weld.Name = "RootBind"
+			weld.Part0 = root
+			weld.Part1 = humRoot
+			weld.Parent = root
+		end
+	end
+	return root
+end
+
+--[[
+	根到脚底的距离。只认相对主节点的几何，不认 HipHeight / WorldPivot。
+	@param model Model - 棋子
+	@return number - 根中心到脚底
+]]
+local function _footLift(model: Model): number
+	local root = _rootOf(model)
+	if not root then
+		return DEFAULT_HIP
+	end
+	local originY = root.Position.Y
 	local lowest = originY
+	local found = false
 	for _, inst in model:GetDescendants() do
-		if inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
+		if inst:IsA("BasePart") and inst ~= root and inst.Name ~= ROOT_NAME then
 			local holder = inst.Parent
 			if not (holder and (holder:IsA("Accoutrement") or holder:IsA("Tool"))) then
 				local bottom = inst.Position.Y - inst.Size.Y * 0.5
-				if bottom < lowest then
+				if not found or bottom < lowest then
 					lowest = bottom
+					found = true
 				end
 			end
 		end
 	end
-	local measured = originY - lowest - hrpHalf
-	if measured > 0.2 then
-		return measured
+	if not found then
+		return DEFAULT_HIP
 	end
-	return DEFAULT_HIP
+	local lift = originY - lowest
+	if lift < 0.4 then
+		return DEFAULT_HIP
+	end
+	return lift
 end
 
 --[[
@@ -290,7 +425,7 @@ end
 	@param lookY number? - 朝向行
 	@param faction number? - 阵营（无朝向时用）
 	@param unitType number? - 兵种 Id；缺省按非飞行
-	@return CFrame - 根部位姿
+	@return CFrame - HumanRootPart 位姿
 ]]
 local function _pivotAt(
 	x: number,
@@ -302,15 +437,29 @@ local function _pivotAt(
 	unitType: number?
 ): CFrame
 	local center = BoardView.CellCenter(x, y)
-	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	local hrpY = if hrp and hrp:IsA("BasePart") then hrp.Size.Y * 0.5 else 1
-	local pos = Vector3.new(center.X, _boardY() + _standOffset(x, y, unitType) + TILE_HALF + _hipOf(model) + hrpY, center.Z)
+	local pos = Vector3.new(center.X, _boardY() + _standOffset(x, y, unitType) + TILE_HALF + _footLift(model), center.Z)
 	if lookX ~= nil and lookY ~= nil and (lookX ~= x or lookY ~= y) then
 		local look = BoardView.CellCenter(lookX, lookY)
 		return CFrame.lookAt(pos, Vector3.new(look.X, pos.Y, look.Z))
 	end
 	local yaw = if faction == EnumMgr.AEFaction.Player then math.pi else 0
 	return CFrame.new(pos) * CFrame.Angles(0, yaw, 0)
+end
+
+--[[
+	只写 HumanRootPart，避免 WorldPivot / 身体零件把整模拖飞。
+	@param model Model - 棋子
+	@param cf CFrame - 根部位姿
+	@return BasePart? - 根
+]]
+local function _setRootCFrame(model: Model, cf: CFrame): BasePart?
+	local root = _bindRoot(model)
+	if not root then
+		return nil
+	end
+	root.CFrame = cf
+	model.WorldPivot = cf
+	return root
 end
 
 --[[
@@ -329,7 +478,7 @@ end
 	@return Animator? - 动画器
 ]]
 local function _animatorOf(model: Model): Animator?
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local humanoid = model:FindFirstChildWhichIsA("Humanoid", true)
 	if not humanoid then
 		return nil
 	end
@@ -390,7 +539,7 @@ local function _cancelWalks()
 			_setWalkAnim(model, false)
 			local unit = _unitSnap[id]
 			if unit and model.Parent then
-				model:PivotTo(_unitPivot(unit, model))
+				_setRootCFrame(model, _unitPivot(unit, model))
 			end
 		end
 	end
@@ -411,8 +560,18 @@ local function _walkUnit(model: Model, unit: any, cells: { any }, gen: number)
 	end
 	_walking[unit.id] = true
 	_setWalkAnim(model, true)
-	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	if not (hrp and hrp:IsA("BasePart")) then
+	local root = _bindRoot(model)
+	if not root then
+		_walking[unit.id] = nil
+		return
+	end
+	local start = cells[1]
+	_setRootCFrame(
+		model,
+		_pivotAt(start.x, start.y, model, cells[2].x, cells[2].y, unit.faction, unit.unitType)
+	)
+	root = _rootOf(model)
+	if not root then
 		_walking[unit.id] = nil
 		return
 	end
@@ -431,40 +590,226 @@ local function _walkUnit(model: Model, unit: any, cells: { any }, gen: number)
 			unit.faction,
 			unit.unitType
 		)
-		local tween = TweenService:Create(hrp, MOVE_TWEEN, { CFrame = target })
+		local tween = TweenService:Create(root, MOVE_TWEEN, { CFrame = target })
 		_walkTween[unit.id] = tween
 		tween:Play()
 		tween.Completed:Wait()
 		_walkTween[unit.id] = nil
+		if root.Parent then
+			model.WorldPivot = root.CFrame
+		end
 	end
 	if gen == _walkGen and model.Parent then
-		model:PivotTo(_unitPivot(unit, model))
+		_setRootCFrame(model, _unitPivot(unit, model))
 		_setWalkAnim(model, false)
 	end
 	_walking[unit.id] = nil
 end
 
 --[[
-	串行走路队列
-	@param jobs { any } - { model, unit, cells }
-	@param gen number - 走路代数
+	棋子转向目标格（只写 HumanRootPart）
+	@param model Model - 棋子
+	@param unit table - UnitSnap
+	@param lookX number - 朝向列
+	@param lookY number - 朝向行
 	@return nil
 ]]
-local function _runWalkJobs(jobs: { any }, gen: number)
+local function _faceToward(model: Model, unit: any, lookX: number, lookY: number)
+	if not model.Parent or type(unit) ~= "table" then
+		return
+	end
+	_setRootCFrame(model, _pivotAt(unit.x, unit.y, model, lookX, lookY, unit.faction, unit.unitType))
+end
+
+--[[
+	前冲到峰值（只写 HumanRootPart）
+	@param model Model - 棋子
+	@param unit table - UnitSnap
+	@param lookX number - 目标列
+	@param lookY number - 目标行
+	@param gen number - 播放代数
+	@return CFrame? - 冲出前的根部位姿
+]]
+local function _lungeOut(model: Model, unit: any, lookX: number, lookY: number, gen: number): CFrame?
+	if gen ~= _walkGen or not model.Parent then
+		return nil
+	end
+	local start = _pivotAt(unit.x, unit.y, model, lookX, lookY, unit.faction, unit.unitType)
+	local root = _setRootCFrame(model, start)
+	if not root then
+		return nil
+	end
+	local look = BoardView.CellCenter(lookX, lookY)
+	local dir = Vector3.new(look.X - start.Position.X, 0, look.Z - start.Position.Z)
+	if dir.Magnitude < 0.05 then
+		return start
+	end
+	local peak = start + dir.Unit * LUNGE_DIST
+	local tween = TweenService:Create(root, LUNGE_OUT, { CFrame = peak })
+	_walkTween[unit.id] = tween
+	tween:Play()
+	tween.Completed:Wait()
+	_walkTween[unit.id] = nil
+	if gen ~= _walkGen or not model.Parent then
+		return nil
+	end
+	return start
+end
+
+--[[
+	前冲收回原格
+	@param model Model - 棋子
+	@param unit table - UnitSnap
+	@param startCf CFrame - 冲出前位姿
+	@param gen number - 播放代数
+	@return nil
+]]
+local function _lungeBack(model: Model, unit: any, startCf: CFrame, gen: number)
+	if gen ~= _walkGen or not model.Parent then
+		return
+	end
+	local root = _bindRoot(model)
+	if not root then
+		return
+	end
+	local tween = TweenService:Create(root, LUNGE_BACK, { CFrame = startCf })
+	_walkTween[unit.id] = tween
+	tween:Play()
+	tween.Completed:Wait()
+	_walkTween[unit.id] = nil
+	if gen == _walkGen and model.Parent then
+		_setRootCFrame(model, startCf)
+	end
+end
+
+--[[
+	播一条命中：转向、前冲、特效、飘字、受击/死亡
+	@param hit table - CombatHitSnap
+	@param unitById { [number]: any } - 含阵亡单位
+	@param gen number - 播放代数
+	@return nil
+]]
+local function _playCombatHit(hit: any, unitById: { [number]: any }, gen: number)
+	if gen ~= _walkGen then
+		return
+	end
+	local attacker = unitById[hit.attackerId]
+	local defender = unitById[hit.defenderId]
+	local atkModel = _units[hit.attackerId]
+	local defModel = _units[hit.defenderId]
+	if attacker and atkModel and atkModel.Parent and defender then
+		_faceToward(atkModel, attacker, defender.x, defender.y)
+	end
+	if defender and defModel and defModel.Parent and attacker then
+		_faceToward(defModel, defender, attacker.x, attacker.y)
+	end
+	CombatFx.PlayAttack(atkModel)
+	local startCf: CFrame? = nil
+	if attacker and atkModel and atkModel.Parent and defender then
+		startCf = _lungeOut(atkModel, attacker, defender.x, defender.y, gen)
+	end
+	if gen ~= _walkGen then
+		return
+	end
+	CombatFx.PlaySlash(atkModel, defModel)
+	if defModel and defModel.Parent then
+		CombatFx.PlayHitFx(defModel)
+		CombatFx.ShowDamage(defModel, hit.damage, hit.kind)
+		if hit.alive then
+			CombatFx.PlayHit(defModel)
+		else
+			CombatFx.PlayDeath(defModel)
+		end
+	end
+	if attacker and atkModel and startCf then
+		_lungeBack(atkModel, attacker, startCf, gen)
+	end
+	if gen ~= _walkGen then
+		return
+	end
+	if hit.alive then
+		task.wait(0.12)
+	else
+		task.wait(0.55)
+	end
+end
+
+--[[
+	按命中顺序穿插走路与攻击，剩余路径再补走
+	@param pendingWalk { [number]: any } - unitId → { model, unit, cells }
+	@param pathOrder { number } - 服务端路径顺序
+	@param combatHits { any } - CombatHitSnap 列表
+	@param unitById { [number]: any } - 单位表
+	@param alive { [number]: boolean } - 结算后仍存活
+	@param gen number - 播放代数
+	@return nil
+]]
+local function _runPresentation(
+	pendingWalk: { [number]: any },
+	pathOrder: { number },
+	combatHits: { any },
+	unitById: { [number]: any },
+	alive: { [number]: boolean },
+	gen: number
+)
 	if gen ~= _walkGen then
 		return
 	end
 	_walkBusy = true
-	for _, job in jobs do
+	local consumed: { [number]: boolean } = {}
+
+	local function playWalk(unitId: number)
+		if consumed[unitId] then
+			return
+		end
+		local job = pendingWalk[unitId]
+		if not job then
+			return
+		end
+		consumed[unitId] = true
 		if gen ~= _walkGen then
 			return
 		end
 		BoardView.ShowPath(job.cells)
 		_walkUnit(job.model, job.unit, job.cells, gen)
-	end
-	if gen == _walkGen then
 		BoardView.ClearPath()
-		_walkBusy = false
+	end
+
+	for _, hit in combatHits do
+		if gen ~= _walkGen then
+			return
+		end
+		playWalk(hit.attackerId)
+		_playCombatHit(hit, unitById, gen)
+	end
+	for _, id in pathOrder do
+		if gen ~= _walkGen then
+			return
+		end
+		playWalk(id)
+	end
+	for id in pendingWalk do
+		if gen ~= _walkGen then
+			return
+		end
+		playWalk(id)
+	end
+	if gen ~= _walkGen then
+		return
+	end
+	BoardView.ClearPath()
+	for id, model in _units do
+		if not alive[id] then
+			_walking[id] = nil
+			model:Destroy()
+			_units[id] = nil
+			_unitCell[id] = nil
+			_unitSnap[id] = nil
+		end
+	end
+	_walkBusy = false
+	if _onWalkDone then
+		_onWalkDone()
 	end
 end
 
@@ -531,7 +876,8 @@ end
 	@return boolean - 是
 ]]
 local function _isPlayerCommander(unit: any): boolean
-	return unit.unitType == EnumMgr.AEUnitId.Commander and unit.faction == EnumMgr.AEFaction.Player
+	return tonumber(unit.unitType) == EnumMgr.AEUnitId.Commander
+		and tonumber(unit.faction) == EnumMgr.AEFaction.Player
 end
 
 --[[
@@ -568,45 +914,60 @@ local function _hatList(cfg: any, enemy: boolean): string
 end
 
 --[[
-	按兵种+阵营填 HumanoidDescription（T恤 / 衬衫 / 裤子 / 帽子）
+	按兵种+阵营填 HumanoidDescription：Noob 底色 + 配置装饰
 	@param unit table - UnitSnap
 	@return HumanoidDescription - 外观
 ]]
 local function _descFromCfg(unit: any): HumanoidDescription
 	local desc = Instance.new("HumanoidDescription")
 	local cfg = AERules.GetUnitCfg(unit.unitType)
-	local enemy = unit.faction == EnumMgr.AEFaction.Enemy
+	local enemy = tonumber(unit.faction) == EnumMgr.AEFaction.Enemy
 	if type(cfg) == "table" then
 		desc.GraphicTShirt = _lookId(cfg, enemy, "GraphicTShirt", "EnemyGraphicTShirt")
 		desc.Shirt = _lookId(cfg, enemy, "Shirt", "EnemyShirt")
 		desc.Pants = _lookId(cfg, enemy, "Pants", "EnemyPants")
 		desc.HatAccessory = _hatList(cfg, enemy)
 	end
-	if enemy then
-		desc.HeadColor = Color3.fromRGB(232, 190, 176)
-		desc.LeftArmColor = Color3.fromRGB(232, 190, 176)
-		desc.RightArmColor = Color3.fromRGB(232, 190, 176)
-		desc.TorsoColor = Color3.fromRGB(140, 48, 48)
-		desc.LeftLegColor = Color3.fromRGB(90, 40, 40)
-		desc.RightLegColor = Color3.fromRGB(90, 40, 40)
-	else
-		desc.HeadColor = Color3.fromRGB(204, 142, 105)
-		desc.LeftArmColor = Color3.fromRGB(204, 142, 105)
-		desc.RightArmColor = Color3.fromRGB(204, 142, 105)
-		desc.TorsoColor = Color3.fromRGB(70, 140, 90)
-		desc.LeftLegColor = Color3.fromRGB(50, 80, 60)
-		desc.RightLegColor = Color3.fromRGB(50, 80, 60)
-	end
+	desc.HeadColor = NOOB_YELLOW
+	desc.LeftArmColor = NOOB_YELLOW
+	desc.RightArmColor = NOOB_YELLOW
+	desc.TorsoColor = NOOB_BLUE
+	desc.LeftLegColor = NOOB_GREEN
+	desc.RightLegColor = NOOB_GREEN
 	return desc
 end
 
 --[[
-	取本地玩家当前形象；失败再拉 UserId 形象
-	@return HumanoidDescription? - 可套到 R6
+	本地玩家 UserId；Studio 未登录时为负，不能拉形象
+	@return number - UserId，缺省 0
+]]
+local function _localUserId(): number
+	local localPlayer = Players.LocalPlayer
+	if not localPlayer then
+		return 0
+	end
+	return tonumber(localPlayer.UserId) or 0
+end
+
+--[[
+	取玩家目录形象；UserId 无效再读当前角色已套描述
+	@return HumanoidDescription? - 外观
 ]]
 local function _playerDesc(): HumanoidDescription?
 	local localPlayer = Players.LocalPlayer
-	local character = localPlayer and localPlayer.Character
+	if not localPlayer then
+		return nil
+	end
+	local userId = _localUserId()
+	if userId > 0 then
+		local okUser, desc = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserIdAsync(userId)
+		end)
+		if okUser and desc then
+			return desc
+		end
+	end
+	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		local ok, applied = pcall(function()
@@ -616,16 +977,82 @@ local function _playerDesc(): HumanoidDescription?
 			return applied:Clone()
 		end
 	end
-	if not localPlayer then
+	return nil
+end
+
+--[[
+	按 UserId / 描述生成完整人模（优先 R6，失败再 R15）
+	@param desc HumanoidDescription? - 外观
+	@return Model? - 人模
+]]
+local function _createPlayerAvatar(desc: HumanoidDescription?): Model?
+	local userId = _localUserId()
+	if userId > 0 then
+		local createUser = (Players :: any).CreateHumanoidModelFromUserIdAsync
+		if typeof(createUser) == "function" then
+			local okUser, model = pcall(function()
+				return Players:CreateHumanoidModelFromUserIdAsync(userId)
+			end)
+			if okUser and typeof(model) == "Instance" and model:IsA("Model") then
+				return model
+			end
+		end
+	end
+	if not desc then
 		return nil
 	end
-	local ok, desc = pcall(function()
-		return Players:GetHumanoidDescriptionFromUserIdAsync(localPlayer.UserId)
-	end)
-	if ok and desc then
-		return desc
+	local rigTypes = { Enum.HumanoidRigType.R6, Enum.HumanoidRigType.R15 }
+	for _, rigType in rigTypes do
+		local ok, model = pcall(function()
+			return Players:CreateHumanoidModelFromDescription(desc, rigType)
+		end)
+		if ok and typeof(model) == "Instance" and model:IsA("Model") then
+			return model
+		end
 	end
 	return nil
+end
+
+--[[
+	外观加载后再克隆角色，并清掉战棋锁人留下的隐藏
+	@return Model? - 克隆体
+]]
+local function _cloneDressedPlayer(): Model?
+	local localPlayer = Players.LocalPlayer
+	local character = localPlayer and localPlayer.Character
+	if not character or not localPlayer:HasAppearanceLoaded() then
+		return nil
+	end
+	local wasArchivable = character.Archivable
+	character.Archivable = true
+	local ok, clone = pcall(function()
+		return character:Clone()
+	end)
+	character.Archivable = wasArchivable
+	if not ok or typeof(clone) ~= "Instance" or not clone:IsA("Model") then
+		return nil
+	end
+	for _, inst in clone:GetDescendants() do
+		if inst:IsA("BasePart") then
+			inst.LocalTransparencyModifier = 0
+		end
+	end
+	local desc = _playerDesc()
+	local humanoid = clone:FindFirstChildOfClass("Humanoid")
+	if desc and humanoid then
+		pcall(function()
+			local applyAsync = (humanoid :: any).ApplyDescriptionAsync
+			if typeof(applyAsync) == "function" then
+				humanoid:ApplyDescriptionAsync(desc, Enum.AssetTypeVerification.Default)
+			else
+				humanoid:ApplyDescription(desc)
+			end
+		end)
+		if desc.Parent == nil then
+			desc:Destroy()
+		end
+	end
+	return clone
 end
 
 --[[
@@ -642,12 +1069,12 @@ local function _stripScripts(model: Model)
 end
 
 --[[
-	钉住棋子：只锚 HRP，不写玩家角色
-	@param model Model - R6
+	钉住棋子：只锚 HumanRootPart，不写玩家角色
+	@param model Model - 棋子
 	@return nil
 ]]
 local function _freezeRig(model: Model)
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local humanoid = model:FindFirstChildWhichIsA("Humanoid", true)
 	if humanoid then
 		humanoid.AutoRotate = false
 		humanoid.WalkSpeed = 0
@@ -655,21 +1082,15 @@ local function _freezeRig(model: Model)
 		humanoid.JumpHeight = 0
 		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-		if humanoid.HipHeight < 0.05 then
-			humanoid.HipHeight = DEFAULT_HIP
-		end
-	end
-	local hrp = model:FindFirstChild("HumanoidRootPart")
-	if hrp and hrp:IsA("BasePart") then
-		model.PrimaryPart = hrp
 	end
 	for _, inst in model:GetDescendants() do
 		if inst:IsA("BasePart") then
 			inst.CanCollide = false
 			inst.Massless = true
-			inst.Anchored = inst.Name == "HumanoidRootPart"
+			inst.Anchored = inst.Name == ROOT_NAME
 		end
 	end
+	_bindRoot(model)
 end
 
 --[[
@@ -693,22 +1114,163 @@ local function _createR6(desc: HumanoidDescription): Model?
 end
 
 --[[
-	异步把占位换成穿衣 R6
+	指挥官与普通士兵持剑
+	@param unit table - UnitSnap
+	@return boolean - 要持剑
+]]
+local function _holdsSword(unit: any): boolean
+	local unitType = tonumber(unit.unitType)
+	return unitType == EnumMgr.AEUnitId.Commander or unitType == EnumMgr.AEUnitId.Soldier
+end
+
+--[[
+	建一把短剑（握把为主节点，刃沿 +Y）
+	@return Model - 剑
+]]
+local function _makeSword(): Model
+	local sword = Instance.new("Model")
+	sword.Name = SWORD_NAME
+	local function part(name: string, size: Vector3, color: Color3, cf: CFrame, shape: Enum.PartType?): BasePart
+		local inst = Instance.new("Part")
+		inst.Name = name
+		inst.Anchored = false
+		inst.CanCollide = false
+		inst.CanQuery = false
+		inst.CanTouch = false
+		inst.Massless = true
+		inst.Material = Enum.Material.Metal
+		inst.Color = color
+		inst.Size = size
+		inst.CFrame = cf
+		if shape then
+			inst.Shape = shape
+		end
+		inst.Parent = sword
+		return inst
+	end
+	local handle = part("Handle", Vector3.new(0.18, 0.72, 0.18), SWORD_HILT, CFrame.new(0, 0, 0))
+	handle.Material = Enum.Material.Wood
+	part("Pommel", Vector3.new(0.26, 0.26, 0.26), SWORD_GUARD, CFrame.new(0, -0.42, 0), Enum.PartType.Ball)
+	part("Guard", Vector3.new(0.9, 0.12, 0.22), SWORD_GUARD, CFrame.new(0, 0.4, 0))
+	local blade = part("Blade", Vector3.new(0.22, 2.15, 0.08), SWORD_STEEL, CFrame.new(0, 1.52, 0))
+	blade.Material = Enum.Material.SmoothPlastic
+	part("Tip", Vector3.new(0.2, 0.28, 0.08), SWORD_STEEL, CFrame.new(0, 2.68, 0) * CFrame.Angles(0, 0, math.rad(45)))
+	sword.PrimaryPart = handle
+	return sword
+end
+
+--[[
+	把剑焊到右手
+	@param model Model - 棋子
+	@return nil
+]]
+local function _equipSword(model: Model)
+	local old = model:FindFirstChild(SWORD_NAME, true)
+	if old then
+		old:Destroy()
+	end
+	local hold = model:FindFirstChild("Right Arm", true) or model:FindFirstChild("RightHand", true)
+	if not (hold and hold:IsA("BasePart")) then
+		return
+	end
+	local sword = _makeSword()
+	local grip: CFrame
+	if hold.Name == "RightHand" then
+		grip = hold.CFrame * CFrame.new(0, -0.08, 0.02) * CFrame.Angles(math.rad(-90), 0, 0)
+	else
+		grip = hold.CFrame * CFrame.new(0, -0.95, -0.42)
+	end
+	sword:PivotTo(grip)
+	sword.Parent = model
+	local handle = sword.PrimaryPart
+	if handle then
+		local weld = Instance.new("WeldConstraint")
+		weld.Name = "SwordBind"
+		weld.Part0 = hold
+		weld.Part1 = handle
+		weld.Parent = handle
+	end
+end
+
+--[[
+	把人模整模挂进棋子容器，主节点保持 HumanRootPart。
+	指挥官不拆零件，避免 Humanoid 换父级把衣服/配件拆掉。
+	@param model Model - 棋子容器
+	@param rig Model - 人模
+	@param unit table - UnitSnap
+	@param nest boolean - 整模挂入；false 则仍拆零件（兵种配置人模）
+	@return nil
+]]
+local function _attachRig(model: Model, rig: Model, unit: any, nest: boolean)
+	_stripScripts(rig)
+	local keep = _bindRoot(model)
+	if not keep then
+		rig:Destroy()
+		return
+	end
+	local keepCf = keep.CFrame
+	if nest then
+		rig.Name = "Avatar"
+		rig.Parent = model
+	else
+		for _, child in rig:GetChildren() do
+			if child.Name ~= ROOT_NAME then
+				child.Parent = model
+			end
+		end
+		rig:Destroy()
+	end
+	_freezeRig(model)
+	_setRootCFrame(model, keepCf)
+	if model.Parent and not _walking[unit.id] then
+		local live = _unitSnap[unit.id] or unit
+		_setRootCFrame(model, _unitPivot(live, model))
+	end
+end
+
+--[[
+	异步套人模；我方指挥官只走玩家 UserId 形象，失败不回退配置衣服
 	@param model Model - 棋子容器
 	@param unit table - UnitSnap
 	@return nil
 ]]
 local function _fillR6(model: Model, unit: any)
 	task.spawn(function()
+		local rig: Model? = nil
 		local desc: HumanoidDescription? = nil
 		if _isPlayerCommander(unit) then
-			desc = _playerDesc()
+			for _ = 1, 24 do
+				desc = _playerDesc()
+				rig = _createPlayerAvatar(desc)
+				if desc and desc.Parent == nil then
+					desc:Destroy()
+				end
+				desc = nil
+				if not rig then
+					rig = _cloneDressedPlayer()
+				end
+				if rig then
+					break
+				end
+				task.wait(0.25)
+			end
+			if not rig then
+				Log.warn("BoardView 指挥官套玩家形象失败", unit.id)
+				return
+			end
+			if not model.Parent then
+				rig:Destroy()
+				return
+			end
+			_attachRig(model, rig, unit, true)
+			if _holdsSword(unit) then
+				_equipSword(model)
+			end
+			return
 		end
-		if not desc then
-			desc = _descFromCfg(unit)
-		end
-		local rig = _createR6(desc)
-		if desc and desc.Parent == nil then
+		desc = _descFromCfg(unit)
+		rig = _createR6(desc)
+		if desc.Parent == nil then
 			desc:Destroy()
 		end
 		if not rig or not model.Parent then
@@ -717,35 +1279,15 @@ local function _fillR6(model: Model, unit: any)
 			end
 			return
 		end
-		_stripScripts(rig)
-		_freezeRig(rig)
-		local stub = model:FindFirstChild("HumanoidRootPart")
-		for _, child in rig:GetChildren() do
-			child.Parent = model
-		end
-		rig:Destroy()
-		if stub and stub.Parent == model and #model:GetChildren() > 1 then
-			local real = nil
-			for _, child in model:GetChildren() do
-				if child.Name == "HumanoidRootPart" and child ~= stub then
-					real = child
-					break
-				end
-			end
-			if real then
-				stub:Destroy()
-			end
-		end
-		_freezeRig(model)
-		if model.Parent and not _walking[unit.id] then
-			local live = _unitSnap[unit.id] or unit
-			model:PivotTo(_unitPivot(live, model))
+		_attachRig(model, rig, unit, true)
+		if _holdsSword(unit) then
+			_equipSword(model)
 		end
 	end)
 end
 
 --[[
-	建棋子：先占位，再异步套 R6 衣服/玩家形象
+	建棋子：先占位 HumanRootPart，再异步套衣服/玩家形象
 	@param unit table - UnitSnap
 	@return Model - 表现
 ]]
@@ -753,19 +1295,19 @@ local function _makeUnit(unit: any): Model
 	local model = Instance.new("Model")
 	model.Name = "Unit_" .. tostring(unit.id)
 	model:SetAttribute(UNIT_ATTR, unit.id)
-	local hrp = Instance.new("Part")
-	hrp.Name = "HumanoidRootPart"
-	hrp.Anchored = true
-	hrp.CanCollide = false
-	hrp.CanQuery = false
-	hrp.CanTouch = false
-	hrp.Transparency = 1
-	hrp.Size = Vector3.new(2, 2, 1)
-	hrp.Parent = model
-	model.PrimaryPart = hrp
+	local root = Instance.new("Part")
+	root.Name = ROOT_NAME
+	root.Anchored = true
+	root.CanCollide = false
+	root.CanQuery = false
+	root.CanTouch = false
+	root.Transparency = 1
+	root.Size = Vector3.new(2, 2, 1)
+	root.Parent = model
+	model.PrimaryPart = root
 	local folder = _ensureFolder()
 	model.Parent = folder
-	model:PivotTo(_unitPivot(unit, model))
+	_setRootCFrame(model, _unitPivot(unit, model))
 	_fillR6(model, unit)
 	return model
 end
@@ -788,16 +1330,15 @@ local function _placeUnit(model: Model, unit: any, instant: boolean)
 	if _walking[unit.id] then
 		return
 	end
-	local hrp = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-	if hrp and hrp:IsA("BasePart") then
-		if shouldTween then
-			TweenService:Create(hrp, MOVE_TWEEN, { CFrame = target }):Play()
-		else
-			model:PivotTo(target)
-		end
+	local root = _bindRoot(model)
+	if not root then
 		return
 	end
-	model:PivotTo(target)
+	if shouldTween then
+		TweenService:Create(root, MOVE_TWEEN, { CFrame = target }):Play()
+		return
+	end
+	_setRootCFrame(model, target)
 end
 
 --[[
@@ -853,12 +1394,36 @@ function BoardView.Apply(snap: any)
 			end
 		end
 	end
-	if #pathOrder > 0 then
+	local combatHits = {}
+	local keepDead: { [number]: boolean } = {}
+	if type(snap.combatHits) == "table" then
+		for _, hit in snap.combatHits do
+			local attackerId = tonumber(hit and hit.attackerId)
+			local defenderId = tonumber(hit and hit.defenderId)
+			if attackerId and defenderId then
+				table.insert(combatHits, {
+					attackerId = attackerId,
+					defenderId = defenderId,
+					damage = tonumber(hit.damage) or 0,
+					remainHp = tonumber(hit.remainHp) or 0,
+					alive = hit.alive == true,
+					kind = if hit.kind == "Counter" then "Counter" else "Attack",
+				})
+				keepDead[defenderId] = true
+			end
+		end
+	end
+	if #pathOrder > 0 or #combatHits > 0 then
 		_cancelWalks()
 	end
 
+	local unitById: { [number]: any } = {}
+	for _, unit in snap.units do
+		unitById[unit.id] = unit
+	end
+
 	local pendingWalk: { [number]: any } = {}
-	local alive = {}
+	local alive: { [number]: boolean } = {}
 	for _, unit in snap.units do
 		if unit.alive then
 			alive[unit.id] = true
@@ -884,21 +1449,12 @@ function BoardView.Apply(snap: any)
 			else
 				_placeUnit(model, unit, created)
 			end
+		elseif keepDead[unit.id] then
+			_unitSnap[unit.id] = unit
 		end
-	end
-	local walkJobs = {}
-	for _, id in pathOrder do
-		local job = pendingWalk[id]
-		if job then
-			table.insert(walkJobs, job)
-			pendingWalk[id] = nil
-		end
-	end
-	for _, job in pendingWalk do
-		table.insert(walkJobs, job)
 	end
 	for id, model in _units do
-		if not alive[id] then
+		if not alive[id] and not keepDead[id] then
 			_walking[id] = nil
 			model:Destroy()
 			_units[id] = nil
@@ -906,9 +1462,11 @@ function BoardView.Apply(snap: any)
 			_unitSnap[id] = nil
 		end
 	end
-	if #walkJobs > 0 then
+	local hasWalk = next(pendingWalk) ~= nil
+	if hasWalk or #combatHits > 0 then
+		_walkBusy = true
 		local gen = _walkGen
-		task.spawn(_runWalkJobs, walkJobs, gen)
+		task.spawn(_runPresentation, pendingWalk, pathOrder, combatHits, unitById, alive, gen)
 	end
 end
 
@@ -953,6 +1511,32 @@ function BoardView.Highlight(cells: { any }, selectedX: number?, selectedY: numb
 		sel.CFrame = CFrame.new(BoardView.CellCenter(selectedX, selectedY) + Vector3.new(0, 0.7, 0))
 		sel.Parent = folder
 		_selected = sel
+	end
+end
+
+--[[
+	高亮可攻击格（红格）
+	@param cells { { x: number, y: number } } - 目标格
+	@return nil
+]]
+function BoardView.HighlightAttack(cells: { any })
+	BoardView.ClearHighlights()
+	local folder = _ensureFolder()
+	for _, cell in cells do
+		local mark = Instance.new("Part")
+		mark.Name = "Attack"
+		mark.Anchored = true
+		mark.CanCollide = false
+		mark.CanQuery = false
+		mark:SetAttribute("X", cell.x)
+		mark:SetAttribute("Y", cell.y)
+		mark.Material = Enum.Material.Neon
+		mark.Color = Color3.fromRGB(220, 48, 48)
+		mark.Transparency = 0.45
+		mark.Size = Vector3.new(_tileSize() - 1.2, 0.2, _tileSize() - 1.2)
+		mark.CFrame = CFrame.new(BoardView.CellCenter(cell.x, cell.y) + Vector3.new(0, 0.64, 0))
+		mark.Parent = folder
+		table.insert(_highlights, mark)
 	end
 end
 

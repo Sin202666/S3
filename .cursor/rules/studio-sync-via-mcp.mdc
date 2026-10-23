@@ -13,11 +13,13 @@ alwaysApply: true
 - 写完后用 `script_grep` / `script_read` 回读验证（含中文不乱码）。
 - Studio 处于 Play 时先 `start_stop_play` 停止，再在 Edit 下修改。
 - 不确定 Studio 实例时先 `list_roblox_studios`。
+- **控完编辑器 Camera 必须改回**：用 `screen_capture`（带 `camera_position`）或 `execute_luau` 改过 `workspace.CurrentCamera` 后，**同一轮、本轮结束前**还原。控前快照 `CameraType` / `CFrame` / `Focus`（必要时 `FieldOfView`）；控后写回快照。没快照则至少把 `CameraType` 设回 `Enum.CameraType.Custom`（编辑器默认）。禁止把 `Scriptable` / `Fixed` 等留给用户。只动 Edit 的 `CurrentCamera`，不要改业务脚本里的相机逻辑。
 
 ## 禁止
 - 让用户"启动 Rojo / 重新 Connect / 等 Rojo 同步"。
 - 只改本地不同步 Studio，或只改 Studio 不改本地。
 - 排查问题时把"Studio 与本地不一致"归因于 Rojo；应直接用 MCP 补写差异。
+- 用完编辑器相机不还原（视口卡住、用户无法绕转/平移）。
 
 ## 路径映射（本地 → Studio）
 | 本地 | Studio |

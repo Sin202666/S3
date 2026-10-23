@@ -421,6 +421,7 @@ Language.localizationtableConf={
 	["金币"]={"金币","Gold"},
 	["你的回合"]={"你的回合","Your Turn"},
 	["失败"]={"失败","Defeat"},
+	["待命"]={"待命","Wait"},
 	["生命"]={"生命","HP"},
 	["无法开始对局"]={"无法开始对局","Cannot start match"},
 	["招募"]={"招募","Recruit"},

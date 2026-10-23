@@ -1,9 +1,9 @@
 --[[
 	Module: Input
-	Description: 战棋按地面格选单位 / 移动 / 攻击；意图发服务端。悬浮高亮当前格，可走格预览路径。
+	Description: 战棋按地面格选单位 / 移动；点单位后出环形操作（攻击/占领/待命）。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -15,6 +15,7 @@ local AERules = Utils.AERules
 local EnumMgr = Utils.EnumMgr
 
 local BoardView = require(script.Parent.BoardView)
+local ActionRing = require(script.Parent.ActionRing)
 
 local Input = {}
 
@@ -25,6 +26,7 @@ local _onSelect: (() -> ())? = nil
 local _conn: RBXScriptConnection? = nil
 local _hoverConn: RBXScriptConnection? = nil
 local _pathKey = ""
+local _attackMode = false
 
 --[[
 	按 Id 取单位
@@ -92,7 +94,7 @@ end
 	@return nil
 ]]
 local function _refreshPathPreview(x: number?, y: number?)
-	if BoardView.IsWalking() then
+	if BoardView.IsBusy() then
 		return
 	end
 	if x == nil or y == nil or not _snap or not _selectedId then
@@ -129,11 +131,55 @@ local function _refreshPathPreview(x: number?, y: number?)
 end
 
 --[[
+	射程内敌军
+	@param unit table - 己方单位
+	@return { any } - { x, y, id }
+]]
+local function _enemiesInRange(unit: any): { any }
+	if not _snap then
+		return {}
+	end
+	local cfg = AERules.GetUnitCfg(unit.unitType)
+	local rangeMin = if cfg then tonumber(cfg.RangeMin) or 1 else 1
+	local rangeMax = if cfg then tonumber(cfg.RangeMax) or 1 else 1
+	local list = {}
+	for _, other in _snap.units do
+		if other.alive and other.faction ~= unit.faction then
+			if AERules.InRange(unit.x, unit.y, other.x, other.y, rangeMin, rangeMax) then
+				table.insert(list, { x = other.x, y = other.y, id = other.id })
+			end
+		end
+	end
+	return list
+end
+
+--[[
+	当前格能否占领
+	@param unit table - 单位
+	@return boolean - 可以
+]]
+local function _canOccupy(unit: any): boolean
+	if not _snap or unit.acted then
+		return false
+	end
+	for _, tile in AERules.CellsFromSnap(_snap) do
+		if tile.x == unit.x and tile.y == unit.y then
+			return AERules.CanOccupy(tile.legend, tile.owner, unit.faction)
+		end
+	end
+	return false
+end
+
+--[[
 	刷新高亮
 	@return nil
 ]]
 local function _refreshHighlight()
 	local unit = _selectedId and _unitById(_selectedId)
+	if _attackMode and unit then
+		BoardView.HighlightAttack(_enemiesInRange(unit))
+		return
+	end
 	BoardView.Highlight(_reachList(), unit and unit.x, unit and unit.y)
 end
 
@@ -142,6 +188,9 @@ end
 	@return boolean - 在 HUD 上
 ]]
 local function _isPointerOverHud(): boolean
+	if ActionRing.IsPointerOver() then
+		return true
+	end
 	local player = Players.LocalPlayer
 	local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
 	if not playerGui then
@@ -197,11 +246,70 @@ local function _updateHover()
 end
 
 --[[
+	点中环形按钮
+	@param actionId string - Attack / Occupy / Wait
+	@return nil
+]]
+local function _onRingPick(actionId: string)
+	if not _snap or not _onAction or not _selectedId then
+		return
+	end
+	if actionId == "Attack" then
+		_attackMode = true
+		_refreshHighlight()
+		return
+	end
+	if actionId == "Occupy" then
+		_attackMode = false
+		ActionRing.Hide()
+		_onAction(EnumMgr.AEAction.Occupy, { unitId = _selectedId })
+		return
+	end
+	if actionId == "Wait" then
+		_attackMode = false
+		ActionRing.Hide()
+		_onAction(EnumMgr.AEAction.Wait, { unitId = _selectedId })
+	end
+end
+
+--[[
+	按选中单位刷新操作环
+	@return nil
+]]
+local function _refreshRing()
+	if BoardView.IsBusy() then
+		ActionRing.Hide()
+		return
+	end
+	if not _snap or not _selectedId or _snap.turnFaction ~= EnumMgr.AEFaction.Player or _snap.result then
+		ActionRing.Hide()
+		return
+	end
+	local unit = _unitById(_selectedId)
+	if not unit or not unit.alive or unit.acted or unit.faction ~= EnumMgr.AEFaction.Player then
+		ActionRing.Hide()
+		return
+	end
+	local actions = {}
+	if #_enemiesInRange(unit) > 0 then
+		table.insert(actions, { id = "Attack", key = "攻击" })
+	end
+	if _canOccupy(unit) then
+		table.insert(actions, { id = "Occupy", key = "占领" })
+	end
+	table.insert(actions, { id = "Wait", key = "待命" })
+	ActionRing.Show(unit.id, actions, _onRingPick)
+end
+
+--[[
 	处理一次点击。只认地面格，避免邻格棋子模型互相挡。
 	@return nil
 ]]
 local function _onClick()
 	if not _snap or not _onAction then
+		return
+	end
+	if BoardView.IsBusy() then
 		return
 	end
 	if _snap.result or _snap.turnFaction ~= EnumMgr.AEFaction.Player then
@@ -218,19 +326,32 @@ local function _onClick()
 	if occupant then
 		if occupant.faction == EnumMgr.AEFaction.Player then
 			_selectedId = occupant.id
+			_attackMode = false
 			_refreshHighlight()
+			_refreshRing()
 			if _onSelect then
 				_onSelect()
 			end
 			return
 		end
-		if _selectedId then
+		if _selectedId and _attackMode then
 			_onAction(EnumMgr.AEAction.Attack, { unitId = _selectedId, targetId = occupant.id })
+			_attackMode = false
 			return
 		end
 	end
+	if _attackMode then
+		_attackMode = false
+		_refreshHighlight()
+		_refreshRing()
+		return
+	end
 	if _selectedId then
-		_onAction(EnumMgr.AEAction.Move, { unitId = _selectedId, x = x, y = y })
+		local unit = _unitById(_selectedId)
+		if unit and not unit.moved and not unit.acted then
+			ActionRing.Hide()
+			_onAction(EnumMgr.AEAction.Move, { unitId = _selectedId, x = x, y = y })
+		end
 	end
 end
 
@@ -243,6 +364,10 @@ end
 function Input.Start(onAction: (string, any) -> (), onSelect: (() -> ())?)
 	_onAction = onAction
 	_onSelect = onSelect
+	BoardView.SetWalkDoneListener(function()
+		_refreshHighlight()
+		_refreshRing()
+	end)
 	if _conn then
 		return
 	end
@@ -273,8 +398,10 @@ function Input.SetSnap(snap: any)
 		end
 	end
 	_pathKey = ""
+	_attackMode = false
 	_refreshHighlight()
 	_updateHover()
+	_refreshRing()
 end
 
 --[[
@@ -305,6 +432,9 @@ function Input.Stop()
 	_selectedId = nil
 	_snap = nil
 	_pathKey = ""
+	_attackMode = false
+	BoardView.SetWalkDoneListener(nil)
+	ActionRing.Hide()
 	BoardView.ClearHighlights()
 	BoardView.ClearHover()
 	BoardView.ClearPath()

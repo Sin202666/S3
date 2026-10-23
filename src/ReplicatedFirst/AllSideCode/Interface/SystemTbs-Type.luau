@@ -26,6 +26,15 @@ export type MovePathSnap = {
 	cells: { { x: number, y: number } },
 }
 
+export type CombatHitSnap = {
+	attackerId: number,
+	defenderId: number,
+	damage: number,
+	remainHp: number,
+	alive: boolean,
+	kind: string,
+}
+
 export type MatchSnap = {
 	kind: string,
 	mapId: number,
@@ -40,6 +49,7 @@ export type MatchSnap = {
 	result: string?,
 	allowRecruit: { number },
 	movePaths: { MovePathSnap }?,
+	combatHits: { CombatHitSnap }?,
 }
 
 --[[

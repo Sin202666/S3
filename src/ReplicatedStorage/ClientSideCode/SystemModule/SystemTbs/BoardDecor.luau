@@ -3,10 +3,10 @@
 	Description: 战棋格装饰（树 / 村庄 / 城堡 / 兵营 / 神殿）。只生成表现 Part，
 		不写权威、不挡点击。视觉跟 A4_Slap：Glacier + 2022 Big Stud、方块树、厚土边。
 		剪影按斜俯视可辨：村=坡屋顶农舍，城=四塔+旗帜，营=长营房+旗，殿=立柱尖顶。
-		归属用旗帜/门楣点缀，不整栋染阵营色。
+		归属用大块 Neon 旗帜/屋脊/门楣/条带换色，俯视可辨阵营，不整栋染色。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 
 	能力：
 	- TileColor / TileMaterial：地砖底色与 Glacier + 2022 Big Stud
@@ -15,7 +15,7 @@
 	- SurfaceOffset：水面格相对棋盘的下沉量
 	- StandOffset：棋子站位；非飞行兵在水面再下沉固定深度
 
-	关系：由 BoardView.Apply 每帧快照重建；占领后 owner 变化会换旗色。
+	关系：由 BoardView.Apply 每帧快照重建；占领后 owner 变化会换旗帜/屋脊/条带色。
 
 	标准加载：local BoardDecor = require(script.Parent.BoardDecor)
 
@@ -104,7 +104,7 @@ local function _sitY(height: number, base: number?): number
 end
 
 --[[
-	归属点缀色（旗、门楣）
+	归属点缀色（旗、屋脊、门楣、条带）。己方绿、敌方红、中立米黄。
 	@param owner number - 阵营
 	@return Color3 - 点缀
 ]]
@@ -176,31 +176,55 @@ local function _add(
 end
 
 --[[
-	插一面归属旗
+	放一块归属色零件（Neon，俯视可辨；占领后随 owner 换色）
+	@param parent BasePart - 格子
+	@param name string - 零件名
+	@param size Vector3 - 尺寸
+	@param pos Vector3 - 相对格中心
+	@param owner number - 阵营
+	@param kind string? - wedge / ball / cylinder，默认方块
+	@param ry number? - 绕 Y 旋转
+	@return BasePart - 零件
+]]
+local function _mark(
+	parent: BasePart,
+	name: string,
+	size: Vector3,
+	pos: Vector3,
+	owner: number,
+	kind: string?,
+	ry: number?
+): BasePart
+	return _add(parent, name, size, pos, _accent(owner), Enum.Material.Neon, kind, ry)
+end
+
+--[[
+	插一面大旗：深色旗杆 + Neon 旗面
 	@param parent BasePart - 格子
 	@param px number - 旗杆 X
 	@param pz number - 旗杆 Z
 	@param poleBase number - 旗杆底 Y（相对格中心）
 	@param owner number - 阵营
+	@param tag string? - 多名旗时的后缀，避免重名
 	@return nil
 ]]
-local function _flag(parent: BasePart, px: number, pz: number, poleBase: number, owner: number)
-	local poleH = 1.7
+local function _flag(parent: BasePart, px: number, pz: number, poleBase: number, owner: number, tag: string?)
+	local suffix = tag or ""
+	local poleH = 2.25
 	_add(
 		parent,
-		"FlagPole",
-		Vector3.new(0.12, poleH, 0.12),
+		"FlagPole" .. suffix,
+		Vector3.new(0.14, poleH, 0.14),
 		Vector3.new(px, _sitY(poleH, poleBase), pz),
 		Color3.fromRGB(70, 58, 42),
 		Enum.Material.Wood
 	)
-	_add(
+	_mark(
 		parent,
-		"Flag",
-		Vector3.new(1.15, 0.7, 0.08),
-		Vector3.new(px + 0.62, poleBase + poleH - 0.42, pz),
-		_accent(owner),
-		STYLE_MAT
+		"Flag" .. suffix,
+		Vector3.new(1.7, 1.15, 0.12),
+		Vector3.new(px + 0.9, poleBase + poleH - 0.62, pz),
+		owner
 	)
 end
 
@@ -261,7 +285,12 @@ local function _village(parent: BasePart, owner: number)
 	)
 	_add(parent, "Chimney", Vector3.new(0.42, 1.15, 0.42), Vector3.new(0.45, bodyTop + 1.05, -1.85), Color3.fromRGB(110, 78, 68), Enum.Material.Brick)
 	_add(parent, "Door", Vector3.new(0.7, 1.05, 0.1), Vector3.new(-0.55, TILE_TOP + 0.62, -0.12), wood, Enum.Material.Wood)
-	_add(parent, "Lintel", Vector3.new(0.9, 0.16, 0.12), Vector3.new(-0.55, TILE_TOP + 1.2, -0.1), _accent(owner), Enum.Material.SmoothPlastic)
+	_mark(parent, "Lintel", Vector3.new(1.55, 0.32, 0.16), Vector3.new(-0.55, TILE_TOP + 1.28, -0.08), owner)
+	_mark(parent, "DoorPostL", Vector3.new(0.16, 1.12, 0.16), Vector3.new(-1.12, TILE_TOP + 0.66, -0.08), owner)
+	_mark(parent, "DoorPostR", Vector3.new(0.16, 1.12, 0.16), Vector3.new(0.02, TILE_TOP + 0.66, -0.08), owner)
+	_mark(parent, "RoofRidge", Vector3.new(3.15, 0.28, 0.36), Vector3.new(-0.55, bodyTop + 1.18, -1.25), owner)
+	_mark(parent, "Banner", Vector3.new(1.15, 1.25, 0.1), Vector3.new(-0.55, TILE_TOP + 2.05, -0.08), owner)
+	_flag(parent, 0.85, -1.25, bodyTop + 0.85, owner)
 	_add(
 		parent,
 		"Well",
@@ -299,7 +328,10 @@ local function _castle(parent: BasePart, owner: number)
 	local towerTop = TILE_TOP + towerH
 	_add(parent, "Keep", Vector3.new(2.25, keepH, 2.05), Vector3.new(0, _sitY(keepH), keepZ), stone, Enum.Material.Slate)
 	_add(parent, "Gate", Vector3.new(0.95, 1.55, 0.18), Vector3.new(0, TILE_TOP + 0.82, keepZ + 1.1), Color3.fromRGB(36, 32, 30), Enum.Material.SmoothPlastic)
-	_add(parent, "Lintel", Vector3.new(1.25, 0.28, 0.22), Vector3.new(0, TILE_TOP + 1.72, keepZ + 1.12), _accent(owner), Enum.Material.SmoothPlastic)
+	_mark(parent, "Lintel", Vector3.new(1.55, 0.38, 0.28), Vector3.new(0, TILE_TOP + 1.78, keepZ + 1.14), owner)
+	_mark(parent, "GatePostL", Vector3.new(0.22, 1.6, 0.22), Vector3.new(-0.68, TILE_TOP + 0.85, keepZ + 1.14), owner)
+	_mark(parent, "GatePostR", Vector3.new(0.22, 1.6, 0.22), Vector3.new(0.68, TILE_TOP + 0.85, keepZ + 1.14), owner)
+	_mark(parent, "Banner", Vector3.new(1.35, 1.7, 0.1), Vector3.new(0, TILE_TOP + 2.55, keepZ + 1.08), owner)
 	local towers = {
 		{ "T_BL", -1.55, keepZ - 1.15 },
 		{ "T_BR", 1.55, keepZ - 1.15 },
@@ -310,6 +342,7 @@ local function _castle(parent: BasePart, owner: number)
 		local name, tx, tz = spec[1], spec[2], spec[3]
 		_add(parent, name, Vector3.new(1.15, towerH, 1.15), Vector3.new(tx, _sitY(towerH), tz), stone, Enum.Material.Concrete)
 		_add(parent, name .. "Cap", Vector3.new(1.4, 0.32, 1.4), Vector3.new(tx, _sitY(0.32, towerTop), tz), dark, Enum.Material.Slate)
+		_mark(parent, name .. "Ring", Vector3.new(1.45, 0.28, 1.45), Vector3.new(tx, _sitY(0.28, towerTop - 0.05), tz), owner)
 		_add(parent, name .. "M1", Vector3.new(0.32, 0.38, 0.32), Vector3.new(tx - 0.42, _sitY(0.38, towerTop + 0.32), tz - 0.42), merlon, Enum.Material.Slate)
 		_add(parent, name .. "M2", Vector3.new(0.32, 0.38, 0.32), Vector3.new(tx + 0.42, _sitY(0.38, towerTop + 0.32), tz + 0.42), merlon, Enum.Material.Slate)
 	end
@@ -317,7 +350,8 @@ local function _castle(parent: BasePart, owner: number)
 	_add(parent, "KeepMerlonR", Vector3.new(0.38, 0.4, 0.38), Vector3.new(0.7, _sitY(0.4, keepTop), keepZ), merlon, Enum.Material.Slate)
 	_add(parent, "WallL", Vector3.new(0.35, 1.7, 1.9), Vector3.new(-1.55, _sitY(1.7), keepZ), dark, Enum.Material.Slate)
 	_add(parent, "WallR", Vector3.new(0.35, 1.7, 1.9), Vector3.new(1.55, _sitY(1.7), keepZ), dark, Enum.Material.Slate)
-	_flag(parent, 1.55, keepZ + 1.15, towerTop + 0.7, owner)
+	_flag(parent, 1.55, keepZ + 1.15, towerTop + 0.7, owner, "R")
+	_flag(parent, -1.55, keepZ + 1.15, towerTop + 0.7, owner, "L")
 end
 
 --[[
@@ -338,7 +372,10 @@ local function _barracks(parent: BasePart, owner: number)
 	_add(parent, "Door", Vector3.new(0.8, 1.35, 0.12), Vector3.new(0, TILE_TOP + 0.78, hallZ + 1.16), wood, Enum.Material.Wood)
 	_add(parent, "WinL", Vector3.new(0.7, 0.55, 0.1), Vector3.new(-1.55, TILE_TOP + 1.45, hallZ + 1.16), Color3.fromRGB(80, 140, 170), Enum.Material.Glass)
 	_add(parent, "WinR", Vector3.new(0.7, 0.55, 0.1), Vector3.new(1.55, TILE_TOP + 1.45, hallZ + 1.16), Color3.fromRGB(80, 140, 170), Enum.Material.Glass)
-	_add(parent, "Stripe", Vector3.new(4.75, 0.18, 0.08), Vector3.new(0, TILE_TOP + 2.05, hallZ + 1.14), _accent(owner), Enum.Material.SmoothPlastic)
+	_mark(parent, "Stripe", Vector3.new(4.9, 0.42, 0.14), Vector3.new(0, TILE_TOP + 2.08, hallZ + 1.16), owner)
+	_mark(parent, "DoorFrame", Vector3.new(1.15, 0.28, 0.16), Vector3.new(0, TILE_TOP + 1.55, hallZ + 1.18), owner)
+	_mark(parent, "RoofRidge", Vector3.new(5.1, 0.28, 0.4), Vector3.new(0, hallTop + 0.48, hallZ), owner)
+	_mark(parent, "Banner", Vector3.new(1.2, 1.4, 0.1), Vector3.new(0, TILE_TOP + 2.55, hallZ + 1.2), owner)
 	_flag(parent, 2.2, hallZ, hallTop + 0.32, owner)
 end
 
@@ -353,6 +390,7 @@ local function _shrine(parent: BasePart, owner: number)
 	local gold = Color3.fromRGB(214, 176, 72)
 	local glow = Color3.fromRGB(120, 220, 255)
 	_add(parent, "Plinth", Vector3.new(3.4, 0.5, 3.4), Vector3.new(0, _sitY(0.5), -0.7), marble, Enum.Material.Marble)
+	_mark(parent, "PlinthRim", Vector3.new(3.55, 0.16, 3.55), Vector3.new(0, TILE_TOP + 0.58, -0.7), owner)
 	_add(parent, "Step", Vector3.new(2.1, 0.28, 1.2), Vector3.new(0, _sitY(0.28), 1.05), marble, Enum.Material.Marble)
 	local colH = 2.35
 	local colY = _sitY(colH, TILE_TOP + 0.5)
@@ -375,19 +413,21 @@ local function _shrine(parent: BasePart, owner: number)
 	end
 	local beamY = TILE_TOP + 0.5 + colH
 	_add(parent, "Entablature", Vector3.new(2.7, 0.28, 2.4), Vector3.new(0, _sitY(0.28, beamY), -0.85), gold, Enum.Material.Metal)
-	_add(
+	_mark(
 		parent,
 		"Pediment",
 		Vector3.new(2.85, 1.15, 2.5),
 		Vector3.new(0, _sitY(1.15, beamY + 0.28), -0.85),
-		_accent(owner),
-		Enum.Material.SmoothPlastic,
+		owner,
 		"wedge",
 		-PI * 0.5
 	)
+	_mark(parent, "BannerL", Vector3.new(0.12, 1.55, 0.7), Vector3.new(-1.15, TILE_TOP + 1.85, 0.35), owner)
+	_mark(parent, "BannerR", Vector3.new(0.12, 1.55, 0.7), Vector3.new(1.15, TILE_TOP + 1.85, 0.35), owner)
 	local spireH = 1.6
 	local spireBase = beamY + 0.28 + 0.7
 	_add(parent, "Spire", Vector3.new(0.28, spireH, 0.28), Vector3.new(0, _sitY(spireH, spireBase), -0.85), gold, Enum.Material.Metal)
+	_mark(parent, "OrbRing", Vector3.new(0.95, 0.16, 0.95), Vector3.new(0, spireBase + spireH + 0.02, -0.85), owner, "cylinder")
 	_add(
 		parent,
 		"Orb",
@@ -397,6 +437,7 @@ local function _shrine(parent: BasePart, owner: number)
 		Enum.Material.Neon,
 		"ball"
 	)
+	_flag(parent, 1.35, -0.85, beamY + 0.28 + 1.15, owner)
 end
 
 --[[

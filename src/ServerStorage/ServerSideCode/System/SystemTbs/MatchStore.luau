@@ -3,7 +3,7 @@
 	Description: 战棋会话对局内存：创建、查询、快照。过程态不落盘。
 	Author: 程莘
 	Created: 2026-10-21
-	Last Modified: 2026-10-21
+	Last Modified: 2026-10-23
 ]]
 
 local Utils = require(game.ReplicatedFirst.AllSideCode.UtilsSystem)
@@ -177,6 +177,36 @@ function MatchStore.RecordMovePath(match: any, unitId: number, cells: { any })
 end
 
 --[[
+	记下本帧要播的命中（表现提示，不进存档）
+	@param match table - 对局
+	@param hits { any }? - Combat.ResolveAttack 命中列表
+	@return nil
+]]
+function MatchStore.RecordCombatHits(match: any, hits: { any }?)
+	if type(match) ~= "table" or type(hits) ~= "table" then
+		return
+	end
+	if type(match.lastCombatHits) ~= "table" then
+		match.lastCombatHits = {}
+	end
+	for _, hit in hits do
+		local attackerId = tonumber(hit and hit.attackerId)
+		local defenderId = tonumber(hit and hit.defenderId)
+		local damage = tonumber(hit and hit.damage)
+		if attackerId and defenderId and damage ~= nil then
+			table.insert(match.lastCombatHits, {
+				attackerId = attackerId,
+				defenderId = defenderId,
+				damage = damage,
+				remainHp = tonumber(hit.remainHp) or 0,
+				alive = hit.alive == true,
+				kind = if hit.kind == "Counter" then "Counter" else "Attack",
+			})
+		end
+	end
+end
+
+--[[
 	可序列化快照
 	@param match table - 对局
 	@return table - MatchSnap
@@ -217,6 +247,8 @@ function MatchStore.Snapshot(match: any): any
 	local goldE = match.gold[EnumMgr.AEFaction.Enemy] or 0
 	local movePaths = match.lastMovePaths
 	match.lastMovePaths = nil
+	local combatHits = match.lastCombatHits
+	match.lastCombatHits = nil
 	return {
 		kind = EnumMgr.AENotify.Snapshot,
 		mapId = match.mapId,
@@ -239,6 +271,7 @@ function MatchStore.Snapshot(match: any): any
 		result = match.result,
 		allowRecruit = Copy.deepCopy(match.allowRecruit),
 		movePaths = movePaths,
+		combatHits = combatHits,
 	}
 end
 
